@@ -41,6 +41,7 @@
 mod access;
 mod accounts;
 mod auth;
+mod capacity;
 mod mail;
 
 use std::path::{Path, PathBuf};
@@ -695,7 +696,13 @@ async fn request_access(state: Data<&AppState>, body: poem::web::Json<AccessRequ
     }
     let mut store = accounts::load(&state.repos_root).await;
     let id = accounts::generate_request_id();
-    store.pending_requests.push(accounts::AccessRequest { id, email: email.clone(), repo: body.repo.clone(), message: body.message.clone() });
+    store.pending_requests.push(accounts::AccessRequest {
+        id,
+        email: email.clone(),
+        repo: body.repo.clone(),
+        message: body.message.clone(),
+        is_create_repo_request: false,
+    });
     accounts::save(&state.repos_root, &store)
         .await
         .map_err(|e| poem::Error::from_string(e.to_string(), poem::http::StatusCode::INTERNAL_SERVER_ERROR))?;
@@ -784,11 +791,37 @@ async fn decide_access_request(
 }
 
 /// `PUT /repos/:name` — bareリポジトリを新規作成する(`git init --bare`)。
-/// ログイン必須(`Authorization: Bearer <token>`)。既に存在する場合は
-/// `409 Conflict`を返す。
+/// ログイン必須。**管理者、または`can_create_repos`許可を持つ登録
+/// アカウント**が対象(ユーザー要件: 作成権限自体は誰にでも開放しない)。
+/// さらに**管理者自身の作成も含め**、[`capacity::decide`]による
+/// ディスク空き容量の自動判定を必ず通す(空き容量不足なら`507
+/// Insufficient Storage`)。既に存在する場合は`409 Conflict`を返す。
 #[handler]
 async fn create_repo(req: &Request, PathExtractor(name): PathExtractor<String>, state: Data<&AppState>) -> PoemResult<Response> {
-    require_admin_session(req, &state)?;
+    let identity = session_identity(req, &state);
+    let is_admin = identity.as_deref() == Some(state.admin_email.as_str());
+    if !is_admin {
+        let allowed = match &identity {
+            Some(email) => {
+                let accounts = accounts::load(&state.repos_root).await;
+                accounts.emails.contains(email) && accounts.can_create_repos.contains(email)
+            }
+            None => false,
+        };
+        if !allowed {
+            return Err(poem::Error::from_string("repository creation not permitted for this account", poem::http::StatusCode::FORBIDDEN));
+        }
+    }
+
+    let decision = capacity::decide(&state.repos_root);
+    if !decision.allowed {
+        tracing::warn!("repository creation denied by capacity policy: {decision:?}");
+        return Ok(Response::builder()
+            .status(poem::http::StatusCode::INSUFFICIENT_STORAGE)
+            .content_type("application/json")
+            .body(serde_json::to_vec(&decision).unwrap_or_default()));
+    }
+
     let repo_dir_name = sanitize_repo_name(&name)?;
     let repo_path = state.repos_root.join(&repo_dir_name);
     if repo_path.exists() {
@@ -809,6 +842,48 @@ async fn create_repo(req: &Request, PathExtractor(name): PathExtractor<String>, 
         return Err(poem::Error::from_string("git init --bare failed", poem::http::StatusCode::INTERNAL_SERVER_ERROR));
     }
     Ok(Response::builder().status(poem::http::StatusCode::CREATED).body(repo_dir_name))
+}
+
+#[derive(Deserialize)]
+struct SetCreatePermissionRequest {
+    allow: bool,
+}
+
+/// `PUT /api/accounts/:email/create-permission` — そのアカウントに
+/// リポジトリ新規作成を許可するか(管理者のみ)。
+#[handler]
+async fn set_create_permission(
+    req: &Request,
+    PathExtractor(email): PathExtractor<String>,
+    state: Data<&AppState>,
+    body: poem::web::Json<SetCreatePermissionRequest>,
+) -> PoemResult<Response> {
+    require_admin_session(req, &state)?;
+    let mut store = accounts::load(&state.repos_root).await;
+    if !store.emails.contains(&email) {
+        return Ok(Response::builder().status(poem::http::StatusCode::NOT_FOUND).body("account not found"));
+    }
+    if body.allow {
+        store.can_create_repos.insert(email);
+    } else {
+        store.can_create_repos.remove(&email);
+    }
+    accounts::save(&state.repos_root, &store)
+        .await
+        .map_err(|e| poem::Error::from_string(e.to_string(), poem::http::StatusCode::INTERNAL_SERVER_ERROR))?;
+    Ok(Response::builder().status(poem::http::StatusCode::OK).body("ok"))
+}
+
+/// `GET /api/capacity` — 現在のディスク容量判定結果(誰でも参照可能、
+/// 秘匿情報ではない——「今リポジトリを作れるか」はUI側が事前に案内する
+/// のに有用)。
+#[handler]
+async fn get_capacity(state: Data<&AppState>) -> PoemResult<Response> {
+    let decision = capacity::decide(&state.repos_root);
+    Ok(Response::builder()
+        .status(poem::http::StatusCode::OK)
+        .content_type("application/json")
+        .body(serde_json::to_vec(&decision).unwrap_or_default()))
 }
 
 #[handler]
@@ -992,6 +1067,8 @@ async fn main() -> anyhow::Result<()> {
         .at("/api/accounts/request", post(request_access))
         .at("/api/accounts/requests", get(list_access_requests))
         .at("/api/accounts/requests/:id/decide", post(decide_access_request))
+        .at("/api/accounts/:email/create-permission", put(set_create_permission))
+        .at("/api/capacity", get(get_capacity))
         .nest(
             "/ui",
             poem::endpoint::StaticFilesEndpoint::new(&static_dir).index_file("index.html"),

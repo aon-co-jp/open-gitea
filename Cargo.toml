@@ -22,3 +22,4 @@ rand = "0.8"
 sha2 = "0.10"
 lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "builder", "rustls-tls"] }
 base64 = "0.22"
+fs2 = "0.4"

@@ -24,12 +24,21 @@ pub struct AccessRequest {
     pub email: String,
     pub repo: Option<String>,
     pub message: Option<String>,
+    /// `true`なら「既存リポジトリへのアクセス許可」ではなく
+    /// 「新規リポジトリ作成の許可」を求める申請(`repo`にはその場合、
+    /// 作成したいリポジトリ名が入る)。
+    #[serde(default)]
+    pub is_create_repo_request: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AccountStore {
     pub emails: HashSet<String>,
+    /// 新規リポジトリ作成が許可されているアカウント
+    /// (`emails`に含まれることが前提、さらにこの集合にも入っている
+    /// 必要がある——「ログインはできるが作成はできない」が既定)。
+    pub can_create_repos: HashSet<String>,
     pub pending_requests: Vec<AccessRequest>,
 }
 
