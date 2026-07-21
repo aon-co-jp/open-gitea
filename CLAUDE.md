@@ -33,6 +33,40 @@ CGIプログラム)をサブプロセスとして起動し、HTTPリクエスト
 
 ## HANDOFF
 
+- **2026-07-21(続き) `https://runo.tokyo/rgit`で公開デプロイ完了**
+  (ユーザー指示「runo.tokyo/rgitと言うサブドメインでお願いします」——
+  実際にはサブドメインではなくパスベースのサブルート):
+  1. **WASM側の絶対パスfetch修正**: `web/src/auth.rs`/`web/src/lib.rs`の
+     `fetch("/api/...")`はブラウザの現在ページのパスと無関係にオリジン
+     直下を叩くため、`/rgit`配下にマウントすると壊れる(nginx側で
+     `/rgit`プレフィックスを剥がしてバックエンドへプロキシしていても、
+     ブラウザが送信するリクエストURL自体は絶対パスのまま)。
+     `auth::BASE_PATH = "/rgit"`+`auth::api_url()`ヘルパーで一元的に
+     プレフィックスを付与するよう修正(現状はこの1デプロイ先に
+     ハードコード、複数マウント先の使い回しは未対応と正直に明記)。
+  2. **nginx設定**: `/etc/nginx/conf.d/runo-tokyo-tls.conf`の**443番
+     (SSL)側**の`server`ブロックに`location /rgit/ { proxy_pass
+     http://127.0.0.1:8090/; ... }`を追加(末尾スラッシュでプレフィックス
+     除去)。`location = /rgit`・`location = /rgit/`は`/rgit/ui/`へ
+     301リダイレクト。
+  3. **実装中に発見したミス**: 設定追加スクリプトが誤って**80番
+     (HTTPリダイレクトのみ)側**の`server`ブロックに`/rgit`設定を
+     入れてしまい、実際にリクエストを処理する443番側には反映されて
+     いなかった(`curl`で`404 not found`〈メインrunoアプリの404応答〉が
+     返ることで発覚、`nginx -t`の構文チェックだけでは検出できない
+     種類のミス——正しいserverブロックに入っているかは実アクセスでしか
+     確認できない、という教訓)。443番側へ移動して解消。
+  4. **実機検証**: `https://runo.tokyo/rgit/healthz`→`200 ok`、
+     `https://runo.tokyo/rgit/api/repos`→`200 []`、
+     `https://runo.tokyo/rgit/api/capacity`→実容量データ、
+     `https://runo.tokyo/rgit`・`/rgit/`→ともに`301`で`/rgit/ui/`へ
+     リダイレクトし最終的にWASM UIが表示されることを確認済み。
+  - 次にすべきこと: (1) 実際にブラウザで`https://runo.tokyo/rgit/ui/`を
+    開いてログインフォーム・容量表示が正しく描画されること(Claude
+    Browser pane等での確認は未実施、curlでのHTML取得のみ)、
+    (2) アクセス許可設定・申請一覧・グループ管理UIの実装、
+    (3) 保留中の外部バックアップ同期スクリプトへのRGit組み込み。
+
 - **2026-07-21 新規作成・実機検証**: `runo-forge`という仮称で開発を
   開始した後、`aon-co-jp/RGit`という既存の空リポジトリ(説明文
   「Gitea(Go製)のRust版」)が見つかったため、正式名称を`RGit`に統一。

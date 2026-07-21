@@ -16,6 +16,21 @@ use web_sys::{Document, Headers, Request, RequestInit, RequestMode, Response, St
 const TOKEN_KEY: &str = "rgit_token";
 const EMAIL_KEY: &str = "rgit_email";
 
+/// このデプロイでRGitがマウントされているパス接頭辞
+/// (`https://runo.tokyo/rgit`、2026-07-21)。絶対パスの`fetch`呼び出しは
+/// ブラウザの現在ページのパスと無関係にオリジン直下へ飛ぶため、nginx側で
+/// `/rgit`を剥がしてバックエンドへプロキシしていても、フロントエンドの
+/// 側でこの接頭辞を明示的に付けないと`/api/...`がドメイン直下(接頭辞無し)
+/// を叩いてしまう。**正直な開示**: 現状はこの1箇所にハードコードして
+/// おり、複数のマウント先(例: 別ドメイン・別パス)で同じビルドを使い
+/// 回すことは想定していない——将来必要になれば、ビルド時環境変数や
+/// `index.html`側の設定注入に置き換えること。
+const BASE_PATH: &str = "/rgit";
+
+pub fn api_url(path: &str) -> String {
+    format!("{BASE_PATH}{path}")
+}
+
 fn document() -> Document {
     web_sys::window().expect("no window").document().expect("no document")
 }
@@ -90,7 +105,7 @@ pub async fn authorized_fetch(url: &str, method: &str, body: Option<&str>) -> Re
     }
 
     let window = web_sys::window().ok_or_else(|| JsValue::from_str("no window"))?;
-    let request = Request::new_with_str_and_init(url, &opts)?;
+    let request = Request::new_with_str_and_init(&api_url(url), &opts)?;
     let resp_value = JsFuture::from(window.fetch_with_request(&request)).await?;
     let resp: Response = resp_value.dyn_into()?;
     let status = resp.status();
