@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>RGit</title>
+<style>
+  body { font-family: sans-serif; max-width: 960px; margin: 2rem auto; padding: 0 1rem; }
+  #layout { display: flex; gap: 2rem; }
+  #sidebar { width: 220px; flex-shrink: 0; }
+  #repo-list { list-style: none; padding: 0; }
+  #repo-list li { margin: 0.25rem 0; }
+  a.repo-link { text-decoration: none; color: #0969da; cursor: pointer; }
+  #status { color: #666; font-size: 0.9em; margin-bottom: 1rem; }
+  #readme { border-left: 1px solid #ddd; padding-left: 1.5rem; flex: 1; }
+</style>
+</head>
+<body>
+<h1>RGit</h1>
+<div id="status">起動中...</div>
+<div id="layout">
+  <div id="sidebar"><ul id="repo-list"></ul></div>
+  <div id="readme"><p><em>左のリポジトリ名をクリックするとREADMEを表示します。</em></p></div>
+</div>
+<script type="module">
+  import init from "./rgit_web.js";
+  init();
+</script>
+</body>
+</html>

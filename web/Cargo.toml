@@ -1,0 +1,42 @@
+[package]
+name = "rgit-web"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "RGitのWASMフロントエンド(リポジトリ一覧・README表示)。tokio/hyperで動くRGit本体サーバーのAPIをfetchで叩き、Markdown→HTML変換をブラウザ側(WASM)で行う"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+# serde/serde_json/js_sys::JSONはあえて使わない。JSONパースは自作の最小
+# パーサ(src/rjson.rs)で行い、WASM↔JS境界を跨ぐ呼び出し回数と依存する
+# クレート数の両方を削減する(詳細はsrc/lib.rsのモジュールdoc参照)。
+pulldown-cmark = { version = "0.12", default-features = false }
+
+[dependencies.web-sys]
+version = "0.3"
+features = [
+    "Window",
+    "Document",
+    "Element",
+    "HtmlElement",
+    "Node",
+    "Response",
+    "Request",
+    "RequestInit",
+    "RequestMode",
+    "console",
+]
+
+# ワークスペース([workspace]を持たない独立クレートのためここに直接指定)。
+# opt-level="z"+LTO+panic=abort+stripでWASMバイナリを極小化する
+# (RGit本体はVPS省メモリを狙う設計方針、フロントエンドも同じ思想に合わせる)。
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

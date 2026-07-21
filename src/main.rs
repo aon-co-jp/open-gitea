@@ -79,6 +79,60 @@ async fn list_repos(state: Data<&AppState>) -> PoemResult<poem::web::Json<Vec<St
     Ok(poem::web::Json(names))
 }
 
+#[derive(serde::Serialize)]
+struct ReadmeResponse {
+    branch: String,
+    content: String,
+}
+
+/// `GET /api/repos/:name/readme` — リポジトリのデフォルトブランチにある
+/// `README.md`をそのまま返す(WASMフロント側でMarkdown→HTML変換する)。
+/// `git show <branch>:README.md`をサブプロセス実行して取得する
+/// (bareリポジトリにはワーキングツリーが無いため、`git show`でblobを
+/// 直接読む——`git http-backend`橋渡しと同じ「gitコマンドに任せる」方針)。
+#[handler]
+async fn get_readme(PathExtractor(name): PathExtractor<String>, state: Data<&AppState>) -> PoemResult<Response> {
+    let repo_dir_name = sanitize_repo_name(&name)?;
+    let repo_path = state.repos_root.join(&repo_dir_name);
+    if !repo_path.exists() {
+        return Ok(Response::builder().status(poem::http::StatusCode::NOT_FOUND).body("repository not found"));
+    }
+
+    let head_out = Command::new("git")
+        .arg("-C")
+        .arg(&repo_path)
+        .arg("symbolic-ref")
+        .arg("--short")
+        .arg("HEAD")
+        .output()
+        .await
+        .map_err(|e| poem::Error::from_string(e.to_string(), poem::http::StatusCode::INTERNAL_SERVER_ERROR))?;
+    let branch = String::from_utf8_lossy(&head_out.stdout).trim().to_string();
+    if branch.is_empty() {
+        return Ok(Response::builder().status(poem::http::StatusCode::NOT_FOUND).body("repository has no commits yet"));
+    }
+
+    let show_out = Command::new("git")
+        .arg("-C")
+        .arg(&repo_path)
+        .arg("show")
+        .arg(format!("{branch}:README.md"))
+        .output()
+        .await
+        .map_err(|e| poem::Error::from_string(e.to_string(), poem::http::StatusCode::INTERNAL_SERVER_ERROR))?;
+
+    if !show_out.status.success() {
+        return Ok(Response::builder().status(poem::http::StatusCode::NOT_FOUND).body("README.md not found in default branch"));
+    }
+
+    let content = String::from_utf8_lossy(&show_out.stdout).to_string();
+    let payload = ReadmeResponse { branch, content };
+    Ok(Response::builder()
+        .status(poem::http::StatusCode::OK)
+        .content_type("application/json")
+        .body(serde_json::to_vec(&payload).unwrap_or_default()))
+}
+
 /// `PUT /repos/:name` — bareリポジトリを新規作成する(`git init --bare`)。
 /// 既に存在する場合は`409 Conflict`を返す。
 #[handler]
@@ -222,10 +276,18 @@ async fn main() -> anyhow::Result<()> {
     // `/{repo}.git/info/refs`・`/{repo}.git/git-upload-pack`・
     // `/{repo}.git/git-receive-pack`。`*path`ワイルドカードで一括受け、
     // git http-backend自身にPATH_INFOで経路を判断させる。
+    let static_dir = std::env::var("RGIT_STATIC_DIR").unwrap_or_else(|_| "./static".to_string());
+
     let app = Route::new()
         .at("/healthz", get(healthz))
         .at("/repos", get(list_repos))
         .at("/repos/:name", put(create_repo))
+        .at("/api/repos", get(list_repos))
+        .at("/api/repos/:name/readme", get(get_readme))
+        .nest(
+            "/ui",
+            poem::endpoint::StaticFilesEndpoint::new(&static_dir).index_file("index.html"),
+        )
         .at("/*path", get(git_get).post(git_post))
         .data(state)
         .with(Tracing);
