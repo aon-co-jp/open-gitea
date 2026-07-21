@@ -56,7 +56,7 @@ use poem::{
     web::Path as PathExtractor,
     Body, EndpointExt, Request, Response, Result as PoemResult, Route, Server,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 
@@ -671,6 +671,36 @@ async fn list_accounts(req: &Request, state: Data<&AppState>) -> PoemResult<Resp
         .body(serde_json::to_vec(&emails).unwrap_or_default()))
 }
 
+#[derive(Serialize)]
+struct AccountDetail {
+    email: String,
+    registered: bool,
+    can_create_repos: bool,
+}
+
+/// `GET /api/accounts/:email` — 個別アカウントの登録状態を返す
+/// (管理者のみ)。WASM管理UIが`can_create_repos`の現在値を反映した
+/// チェックボックス/インジケータを描画できるよう、既存の
+/// `list_accounts`(メール一覧のみ)を補完するために追加
+/// (2026-07-21、CLAUDE.mdのHANDOFF記載の宿題への対応)。
+/// 未登録のメールアドレスでも`404`にはせず
+/// `registered: false, can_create_repos: false`を返す
+/// (「まだ登録されていない」という状態も呼び出し側が扱いやすいように)。
+#[handler]
+async fn get_account(req: &Request, PathExtractor(email): PathExtractor<String>, state: Data<&AppState>) -> PoemResult<Response> {
+    require_admin_session(req, &state)?;
+    let store = accounts::load(&state.repos_root).await;
+    let detail = AccountDetail {
+        registered: store.emails.contains(&email),
+        can_create_repos: store.can_create_repos.contains(&email),
+        email,
+    };
+    Ok(Response::builder()
+        .status(poem::http::StatusCode::OK)
+        .content_type("application/json")
+        .body(serde_json::to_vec(&detail).unwrap_or_default()))
+}
+
 /// `DELETE /api/accounts/:email` — アカウント登録を解除する(管理者のみ)。
 /// 既存のセッション自体は自然失効まで有効(即時失効はv0.1.0では未実装)。
 #[handler]
@@ -1049,6 +1079,40 @@ async fn git_post(req: &Request, body: Body, state: Data<&AppState>) -> PoemResu
     git_http_backend(&path_info, &query_string, "POST", &content_type, body, &state.repos_root).await
 }
 
+/// ルーティング定義を`main()`とテスト(`poem::test::TestClient`)の両方から
+/// 再利用できるように切り出したもの(2026-07-21追記)。
+fn build_routes(state: AppState, static_dir: &str) -> impl poem::Endpoint {
+    Route::new()
+        .at("/healthz", get(healthz))
+        .at("/repos", get(list_repos))
+        .at("/repos/:name", put(create_repo))
+        .at("/api/repos", get(list_repos))
+        .at("/api/repos/:name/readme", get(get_readme))
+        .at("/api/repos/:name/access", get(get_access).put(set_access))
+        .at("/api/repos/:name/tree", get(get_tree))
+        .at("/api/repos/:name/zip", get(get_zip))
+        .at("/api/repos/:name/raw/*filepath", get(get_raw_file))
+        .at("/api/auth/request-otp", post(request_otp))
+        .at("/api/auth/verify-otp", post(verify_otp))
+        .at("/api/auth/logout", post(logout))
+        .at("/api/groups", get(list_groups).post(create_group))
+        .at("/api/groups/:name", poem::delete(delete_group))
+        .at("/api/accounts", get(list_accounts).post(add_account))
+        .at("/api/accounts/:email", get(get_account).delete(remove_account))
+        .at("/api/accounts/request", post(request_access))
+        .at("/api/accounts/requests", get(list_access_requests))
+        .at("/api/accounts/requests/:id/decide", post(decide_access_request))
+        .at("/api/accounts/:email/create-permission", put(set_create_permission))
+        .at("/api/capacity", get(get_capacity))
+        .nest(
+            "/ui",
+            poem::endpoint::StaticFilesEndpoint::new(static_dir).index_file("index.html"),
+        )
+        .at("/*path", get(git_get).post(git_post))
+        .data(state)
+        .with(Tracing)
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
@@ -1074,39 +1138,75 @@ async fn main() -> anyhow::Result<()> {
     // git http-backend自身にPATH_INFOで経路を判断させる。
     let static_dir = std::env::var("RGIT_STATIC_DIR").unwrap_or_else(|_| "./static".to_string());
 
-    let app = Route::new()
-        .at("/healthz", get(healthz))
-        .at("/repos", get(list_repos))
-        .at("/repos/:name", put(create_repo))
-        .at("/api/repos", get(list_repos))
-        .at("/api/repos/:name/readme", get(get_readme))
-        .at("/api/repos/:name/access", get(get_access).put(set_access))
-        .at("/api/repos/:name/tree", get(get_tree))
-        .at("/api/repos/:name/zip", get(get_zip))
-        .at("/api/repos/:name/raw/*filepath", get(get_raw_file))
-        .at("/api/auth/request-otp", post(request_otp))
-        .at("/api/auth/verify-otp", post(verify_otp))
-        .at("/api/auth/logout", post(logout))
-        .at("/api/groups", get(list_groups).post(create_group))
-        .at("/api/groups/:name", poem::delete(delete_group))
-        .at("/api/accounts", get(list_accounts).post(add_account))
-        .at("/api/accounts/:email", poem::delete(remove_account))
-        .at("/api/accounts/request", post(request_access))
-        .at("/api/accounts/requests", get(list_access_requests))
-        .at("/api/accounts/requests/:id/decide", post(decide_access_request))
-        .at("/api/accounts/:email/create-permission", put(set_create_permission))
-        .at("/api/capacity", get(get_capacity))
-        .nest(
-            "/ui",
-            poem::endpoint::StaticFilesEndpoint::new(&static_dir).index_file("index.html"),
-        )
-        .at("/*path", get(git_get).post(git_post))
-        .data(state)
-        .with(Tracing);
+    let app = build_routes(state, &static_dir);
 
     let port = std::env::var("RGIT_PORT").unwrap_or_else(|_| "8090".to_string());
     let addr = format!("0.0.0.0:{port}");
     tracing::info!("listening on {addr}");
     Server::new(TcpListener::bind(addr)).run(app).await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod handler_tests {
+    //! `poem::test::TestClient`を使ったハンドラレベルのテスト
+    //! (2026-07-21追記、`GET /api/accounts/:email`〈新規追加分〉の検証)。
+
+    use super::*;
+    use poem::test::TestClient;
+
+    const ADMIN_EMAIL: &str = "admin@example.com";
+
+    async fn make_state(label: &str) -> AppState {
+        let unique = format!("{:?}-{label}", std::time::Instant::now());
+        let repos_root = std::env::temp_dir().join(format!("rgit-handler-test-{}", unique.replace(['{', '}', ':', ' ', '.'], "-")));
+        tokio::fs::create_dir_all(&repos_root).await.unwrap();
+        AppState { repos_root, auth: Arc::new(auth::AuthStore::default()), admin_email: ADMIN_EMAIL.to_string(), smtp: None, accounts_locked: false }
+    }
+
+    #[tokio::test]
+    async fn get_account_reflects_can_create_repos_state() {
+        let state = make_state("get-account").await;
+        let repos_root = state.repos_root.clone();
+        let token = state.auth.create_session(ADMIN_EMAIL);
+        let app = build_routes(state, "./static");
+        let client = TestClient::new(app);
+
+        // 未登録のメールアドレスは404ではなく registered:false を返す。
+        let resp = client
+            .get("/api/accounts/nobody@example.com")
+            .header("Authorization", format!("Bearer {token}"))
+            .send()
+            .await;
+        resp.assert_status_is_ok();
+        let body: serde_json::Value = serde_json::from_slice(&resp.0.into_body().into_bytes().await.unwrap()).unwrap();
+        assert_eq!(body["registered"], false);
+        assert_eq!(body["can_create_repos"], false);
+
+        // アカウント登録+作成許可を付与した状態で反映されることを確認。
+        let mut store = accounts::load(&repos_root).await;
+        store.emails.insert("member@example.com".to_string());
+        store.can_create_repos.insert("member@example.com".to_string());
+        accounts::save(&repos_root, &store).await.unwrap();
+
+        let resp2 = client
+            .get("/api/accounts/member@example.com")
+            .header("Authorization", format!("Bearer {token}"))
+            .send()
+            .await;
+        resp2.assert_status_is_ok();
+        let body2: serde_json::Value = serde_json::from_slice(&resp2.0.into_body().into_bytes().await.unwrap()).unwrap();
+        assert_eq!(body2["registered"], true);
+        assert_eq!(body2["can_create_repos"], true);
+    }
+
+    #[tokio::test]
+    async fn get_account_requires_admin_session() {
+        let state = make_state("get-account-unauth").await;
+        let app = build_routes(state, "./static");
+        let client = TestClient::new(app);
+
+        let resp = client.get("/api/accounts/member@example.com").send().await;
+        resp.assert_status(poem::http::StatusCode::UNAUTHORIZED);
+    }
 }

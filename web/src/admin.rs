@@ -226,12 +226,23 @@ async fn refresh_accounts() {
                 set_html("accounts-list", "<li>登録アカウントはありません</li>");
                 return;
             }
+            // 各アカウントの`can_create_repos`実際の状態を`GET
+            // /api/accounts/:email`(2026-07-21新設)で読み直し、
+            // 「都度上書きする2ボタン」から「現状を反映したチェックボックス」
+            // へ切り替える(前回HANDOFFに記載した宿題への対応)。
             let mut html = String::new();
             for email in &emails {
+                let can_create = match authorized_fetch(&format!("/api/accounts/{}", json_escape(email)), "GET", None).await {
+                    Ok((200, detail_text)) => parse_light(&detail_text)
+                        .ok()
+                        .and_then(|v| v.get("can_create_repos").and_then(LightValue::as_bool))
+                        .unwrap_or(false),
+                    _ => false,
+                };
+                let checked = if can_create { "checked" } else { "" };
                 html.push_str(&format!(
                     "<li data-email=\"{email}\">{email} \
-                     <button type=\"button\" class=\"btn-allow-create\" data-email=\"{email}\">作成許可ON</button> \
-                     <button type=\"button\" class=\"btn-deny-create\" data-email=\"{email}\">作成許可OFF</button> \
+                     <label><input type=\"checkbox\" class=\"acc-can-create\" data-email=\"{email}\" {checked}> 作成許可</label> \
                      <button type=\"button\" class=\"btn-remove-account\" data-email=\"{email}\">削除</button></li>",
                     email = html_escape(email)
                 ));
@@ -286,20 +297,32 @@ async fn set_create_permission(email: String, allow: bool) {
 fn wire_accounts_list() {
     let doc = document();
     let Some(list) = doc.get_element_by_id("accounts-list") else { return };
-    let closure = Closure::<dyn FnMut(web_sys::Event)>::new(move |event: web_sys::Event| {
+
+    let click_closure = Closure::<dyn FnMut(web_sys::Event)>::new(move |event: web_sys::Event| {
         let Some(target) = event.target() else { return };
         let Ok(el) = target.dyn_into::<Element>() else { return };
         let Some(email) = el.get_attribute("data-email") else { return };
         if el.class_list().contains("btn-remove-account") {
             wasm_bindgen_futures::spawn_local(remove_account(email));
-        } else if el.class_list().contains("btn-allow-create") {
-            wasm_bindgen_futures::spawn_local(set_create_permission(email, true));
-        } else if el.class_list().contains("btn-deny-create") {
-            wasm_bindgen_futures::spawn_local(set_create_permission(email, false));
         }
     });
-    list.add_event_listener_with_callback("click", closure.as_ref().unchecked_ref()).ok();
-    closure.forget();
+    list.add_event_listener_with_callback("click", click_closure.as_ref().unchecked_ref()).ok();
+    click_closure.forget();
+
+    // `can_create_repos`はチェックボックス(`.acc-can-create`)の`change`
+    // イベントで反映する(旧: 「作成許可ON/OFF」の2ボタンで都度上書き)。
+    let change_closure = Closure::<dyn FnMut(web_sys::Event)>::new(move |event: web_sys::Event| {
+        let Some(target) = event.target() else { return };
+        let Ok(el) = target.dyn_into::<HtmlInputElement>() else { return };
+        if !el.class_list().contains("acc-can-create") {
+            return;
+        }
+        let Some(email) = el.get_attribute("data-email") else { return };
+        let allow = el.checked();
+        wasm_bindgen_futures::spawn_local(set_create_permission(email, allow));
+    });
+    list.add_event_listener_with_callback("change", change_closure.as_ref().unchecked_ref()).ok();
+    change_closure.forget();
 }
 
 // --- グループ ---

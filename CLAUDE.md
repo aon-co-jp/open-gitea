@@ -390,6 +390,52 @@ CGIプログラム)をサブプロセスとして起動し、HTTPリクエスト
     (2) `can_create_repos`を個別に読み出すAPI追加(現状は書き込みのみ)、
     (3) VPS本番への再デプロイ、(4) 保留中の外部バックアップ同期
     スクリプトへのRGit組み込み。
+
+- **2026-07-21(続き) `GET /api/accounts/:email`(反映的エンドポイント)を
+  追加、WASM管理UIの「作成許可ON/OFF」2ボタンをチェックボックスへ置換
+  (上記(2)の宿題への対応)**:
+  1. **`src/main.rs`**: `get_account`ハンドラ新設(管理者のみ)。
+     `AccountDetail { email, registered, can_create_repos }`をJSONで
+     返す。未登録メールでも`404`にはせず`registered:false`で返す設計
+     (「まだ登録されていない」という状態を呼び出し側が扱いやすい
+     ように)。ルーティングは既存の`/api/accounts/:email`
+     (`DELETE`のみだったもの)に`get(get_account)`を追加する形で
+     `/api/repos/:name/access`と同じ「同一パスにGET/PUT/DELETEを
+     チェーン」パターンを踏襲。
+  2. **ルーティング定義を`build_routes(state, static_dir) -> impl
+     poem::Endpoint`として切り出し**、`main()`とテストの両方から
+     再利用できるようにした(`RS-Chiketto`で先行実施済みの同パターンを
+     RGitにも適用)。`Cargo.toml`の`poem`依存に`features =
+     ["test"]`を追加(`poem::test::TestClient`を使うために必須)。
+  3. **`#[cfg(test)] mod handler_tests`を`src/main.rs`末尾に追加**、2件:
+     未登録メールで`registered:false`・`can_create_repos:false`、
+     登録+作成許可付与後の状態が正しく反映されること、および
+     認証なしアクセスが`401`になることを確認。
+  4. **`web/src/admin.rs`**: `refresh_accounts()`が一覧取得後、各
+     アカウントについて新設の`GET /api/accounts/:email`を呼び、
+     返ってきた`can_create_repos`の実際の値をチェックボックス
+     (`.acc-can-create`、`checked`属性で反映)として描画するよう変更。
+     `wire_accounts_list()`にチェックボックスの`change`イベント
+     リスナーを追加し(`click`リスナーは削除ボタン専用のまま残す)、
+     ON/OFF切り替えで既存の`PUT
+     /api/accounts/:email/create-permission`を呼ぶ。旧「作成許可ON」
+     「作成許可OFF」の2ボタン(`btn-allow-create`/`btn-deny-create`)は
+     削除。
+  5. **検証**: `cargo build`(サーバー本体、ネイティブ)警告0件。
+     `cargo test` **17件全green**(既存15件+今回追加2件)。
+     `cargo build --target wasm32-unknown-unknown --release`
+     (`web/`)**警告0件**、`wasm-bindgen --target web --no-typescript
+     --out-dir static`でJSグルー再生成、`.wasm`は289KB(旧284KBから
+     微増、per-account fetchとチェックボックス配線分)。
+     `cargo build --release`(サーバー本体)成功。
+     **正直な開示**: 実SMTP環境でのブラウザ実操作(実ログイン→
+     チェックボックスの実クリックでON/OFFが切り替わり、リロード後も
+     状態が保持されることの実機確認)はこのセッションでは未実施
+     (ビルド成功・型/ロジックレベルのテストのみ)。次回、SMTPが
+     許容されるタイミングで実ブラウザ確認を推奨。
+  - 次にすべきこと: (1) 上記の実ブラウザでのチェックボックスE2E確認、
+    (2) 実SMTP環境でのフルE2E(ログイン・申請承認・グループ管理含む)、
+    (3) 保留中の外部バックアップ同期スクリプトへのRGit組み込み。
 ---
 
 ## エコシステム全体マップ(2026-07-21追記)
