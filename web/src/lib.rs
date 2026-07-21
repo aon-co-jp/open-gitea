@@ -22,6 +22,8 @@
 //! **正直な開示**: v0.1.0はリポジトリ一覧+README表示のみ。GitHubにある
 //! ディレクトリツリー表示・コミット履歴・シンタックスハイライト等は未実装。
 
+mod auth;
+
 use rust_json::{parse_light, LightValue};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -146,7 +148,37 @@ async fn load_repo_list() {
     }
 }
 
+/// `{"allowed": bool, "free_bytes": u64, "min_free_bytes": u64}`を
+/// `rust_json::parse_light`で直接読む。数値は`LightValue::as_f64`経由
+/// (JSONに浮動小数として保持される、`u64`最大値付近の誤差は表示用途では
+/// 許容)。
+async fn load_capacity() {
+    let Ok((_, text)) = auth::authorized_fetch("/api/capacity", "GET", None).await else { return };
+    let Some(value) = parse_light(&text).ok() else { return };
+    let allowed = value.get("allowed").and_then(LightValue::as_bool).unwrap_or(false);
+    let free_bytes = value.get("free_bytes").and_then(LightValue::as_f64).unwrap_or(0.0);
+    let free_gb = free_bytes / 1_073_741_824.0;
+    let msg = if allowed {
+        format!("空き容量: {free_gb:.1}GB (作成可)")
+    } else {
+        format!("空き容量: {free_gb:.1}GB (残量不足のため新規作成不可)")
+    };
+    if let Some(el) = document().get_element_by_id("capacity-status") {
+        el.set_text_content(Some(&msg));
+    }
+}
+
+/// ログイン成功後に呼ばれる。ログイン状態でリポジトリ一覧・容量表示が
+/// 変わりうるため再読み込みする(v0.1.0はアクセス制御ありのプライベート
+/// リポジトリ一覧切り替えを想定)。
+fn reload_after_login() {
+    wasm_bindgen_futures::spawn_local(load_repo_list());
+    wasm_bindgen_futures::spawn_local(load_capacity());
+}
+
 #[wasm_bindgen(start)]
 pub fn start() {
+    auth::wire_auth_ui();
     wasm_bindgen_futures::spawn_local(load_repo_list());
+    wasm_bindgen_futures::spawn_local(load_capacity());
 }

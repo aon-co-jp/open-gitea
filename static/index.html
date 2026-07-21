@@ -12,10 +12,31 @@
   a.repo-link { text-decoration: none; color: #0969da; cursor: pointer; }
   #status { color: #666; font-size: 0.9em; margin-bottom: 1rem; }
   #readme { border-left: 1px solid #ddd; padding-left: 1.5rem; flex: 1; }
+  #auth-bar { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 1rem; padding: 0.5rem 0.75rem; background: #f6f8fa; border: 1px solid #ddd; border-radius: 6px; font-size: 0.9em; }
+  #auth-bar input { padding: 0.2rem 0.4rem; }
+  #auth-bar button { cursor: pointer; }
+  #auth-status { color: #444; }
+  #capacity-status { margin-left: auto; color: #666; }
+  .hidden { display: none !important; }
+  #auth-error { color: #b00; }
 </style>
 </head>
 <body>
 <h1>RGit</h1>
+<div id="auth-bar">
+  <div id="auth-anon">
+    <input id="login-email" type="email" placeholder="メールアドレス" size="24">
+    <button id="btn-request-otp" type="button">OTP送信</button>
+    <input id="login-code" type="text" placeholder="コード" size="8" class="hidden">
+    <button id="btn-verify-otp" type="button" class="hidden">ログイン</button>
+  </div>
+  <div id="auth-logged-in" class="hidden">
+    <span id="auth-email"></span>
+    <button id="btn-logout" type="button">ログアウト</button>
+  </div>
+  <span id="auth-error"></span>
+  <span id="capacity-status"></span>
+</div>
 <div id="status">起動中...</div>
 <div id="layout">
   <div id="sidebar"><ul id="repo-list"></ul></div>

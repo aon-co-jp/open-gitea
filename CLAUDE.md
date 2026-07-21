@@ -238,3 +238,43 @@ CGIプログラム)をサブプロセスとして起動し、HTTPリクエスト
     バックアップ同期スクリプトへのRGit組み込み、(3) 今回の変更を
     VPS本番へ再デプロイ(現在のVPSはアクセス制御拡張版までで、
     容量判定機能はまだ反映していない)。
+
+- **2026-07-21(続き) WASMフロントエンドにログインUI・容量表示を追加、
+  実機検証済み**: 上記(1)のログインUI着手分。
+  1. **`web/src/auth.rs`新設**: `POST /api/auth/{request-otp,verify-otp,
+     logout}`をfetchで叩くログインフォームロジック。メール入力→
+     「OTP送信」ボタン→コード入力欄出現→「ログイン」ボタンで
+     `verify-otp`→成功したら`localStorage`(キー`rgit_token`/
+     `rgit_email`)へトークン保存。JSONパースは既存方針通り
+     `rust_json::parse_light`(RJSON)のみ、`serde`は使わず自前で
+     JSONエスケープ関数を実装(メールアドレス等をリクエストボディへ
+     埋め込む際の最小限のエスケープ)。認証付きリクエストは
+     `authorized_fetch`(`RequestInit`+`Headers`で`Authorization:
+     Bearer <token>`を付与)に一本化。
+  2. **`web/src/lib.rs`**: `load_capacity()`を追加し`GET
+     /api/capacity`の結果(空き容量GB換算・作成可否)を`#capacity-status`
+     に表示。`start()`で`auth::wire_auth_ui()`を呼び、ログイン成功時
+     `reload_after_login()`でリポジトリ一覧・容量表示を再取得。
+  3. **`static/index.html`**: `#auth-bar`(メール入力・OTP送信ボタン・
+     コード入力・ログインボタン・ログイン中表示・ログアウトボタン・
+     エラー表示・容量表示)を追加。
+  4. **`web/Cargo.toml`**: `web-sys` featuresに`Headers`・`Storage`・
+     `HtmlInputElement`・`DomTokenList`を追加(既存の
+     `opt-level="z"`+LTO+`panic=abort`+`strip`構成は維持)。
+  5. **実機検証(モックではなく実サーバー・実ブラウザ)**:
+     `cargo build --target wasm32-unknown-unknown --release`警告0件で
+     成功、`.wasm`は262KB(旧234KBから微増、認証UI分)。`wasm-bindgen
+     --target web`でJSグルー再生成し`static/`へ配置。実際に`rgit`
+     サーバーを起動(`RGIT_ADMIN_EMAIL`設定・SMTP未設定)し、Claude
+     Browser paneで`http://127.0.0.1:8095/ui/index.html`を開いて
+     ログインフォーム・容量表示(「空き容量: 2546.3GB (作成可)」)・
+     リポジトリ一覧が実際にレンダリングされることを確認。
+     コンソールエラー無し。メールアドレス入力→「OTP送信」を実クリック
+     →SMTP未設定のため`503`が返り、UI上に「サーバーのメール設定が
+     未完了です」と正しく表示されることまで確認(実SMTPでのOTP送受信
+     自体は今回未実施、メール設定が無い環境での検証のみ)。
+  - 次にすべきこと: (1) 実SMTP環境でのOTPログインE2E(コード入力→
+    ログイン成功→ログアウトの一連)、(2) アクセス許可設定・申請一覧・
+    グループ管理のWASM UIは依然未着手、(3) VPS本番への再デプロイ
+    (今回の変更はローカル検証のみ、VPSは未反映)、(4) 保留中の外部
+    バックアップ同期スクリプトへのRGit組み込み。
