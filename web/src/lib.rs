@@ -22,6 +22,7 @@
 //! **正直な開示**: v0.1.0はリポジトリ一覧+README表示のみ。GitHubにある
 //! ディレクトリツリー表示・コミット履歴・シンタックスハイライト等は未実装。
 
+mod admin;
 mod auth;
 
 use rust_json::{parse_light, LightValue};
@@ -58,7 +59,7 @@ fn show_status(msg: &str) {
 
 /// `rust_json::parse_light`(RJSONの`light`モジュール)で文字列配列を
 /// パースする。
-fn parse_string_array(text: &str) -> Vec<String> {
+pub(crate) fn parse_string_array(text: &str) -> Vec<String> {
     let Ok(value) = parse_light(text) else { return Vec::new() };
     let Some(items) = value.as_array() else { return Vec::new() };
     items.iter().filter_map(LightValue::as_str).map(str::to_string).collect()
@@ -175,11 +176,14 @@ async fn load_capacity() {
 fn reload_after_login() {
     wasm_bindgen_futures::spawn_local(load_repo_list());
     wasm_bindgen_futures::spawn_local(load_capacity());
+    admin::refresh_all();
 }
 
 #[wasm_bindgen(start)]
 pub fn start() {
     auth::wire_auth_ui();
+    admin::wire_admin_ui();
     wasm_bindgen_futures::spawn_local(load_repo_list());
     wasm_bindgen_futures::spawn_local(load_capacity());
+    admin::refresh_all();
 }

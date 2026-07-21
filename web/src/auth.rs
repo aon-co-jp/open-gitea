@@ -184,7 +184,7 @@ async fn logout() {
     refresh_auth_ui();
 }
 
-fn json_escape(s: &str) -> String {
+pub(crate) fn json_escape(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
         match c {

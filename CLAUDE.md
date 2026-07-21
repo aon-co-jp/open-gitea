@@ -312,6 +312,84 @@ CGIプログラム)をサブプロセスとして起動し、HTTPリクエスト
     グループ管理のWASM UIは依然未着手、(3) VPS本番への再デプロイ
     (今回の変更はローカル検証のみ、VPSは未反映)、(4) 保留中の外部
     バックアップ同期スクリプトへのRGit組み込み。
+
+- **2026-07-21(続き) WASMフロントエンドにアクセス許可設定・申請一覧・
+  アカウント管理・グループ管理UIを追加(上記(2)の着手分)**:
+  1. **`web/src/admin.rs`新設**: `auth::authorized_fetch`+
+     `rust_json::parse_light`の既存方針を踏襲し、以下4セクションを実装。
+     - **アクセス申請一覧**(`GET /api/accounts/requests`):
+       申請ごとに閲覧/DL/push を個別チェックボックスで選び、「承認」
+       (`POST /api/accounts/requests/:id/decide`)/「却下」ボタンを
+       イベント委譲(`#requests-list`のクリックリスナー1本)で配線。
+     - **登録アカウント管理**: 一覧(`GET /api/accounts`)、追加
+       (`POST /api/accounts`)、削除(`DELETE /api/accounts/:email`)、
+       リポジトリ作成許可のON/OFF(`PUT
+       /api/accounts/:email/create-permission`)。**正直な開示**:
+       `can_create_repos`を個別アカウントについて読み出すAPIが存在しない
+       ため(`list_accounts`はメール一覧のみ返す)、現在値を表示せず
+       「作成許可ON」「作成許可OFF」の2ボタンで都度上書きする方式にした
+       (チェックボックスで現状を反映する設計は次回、対応APIを追加して
+       からにすべき)。
+     - **グループ管理**: 一覧(`GET /api/groups`)、作成(`POST
+       /api/groups`、招待トークンは作成直後のレスポンスにしか出ない
+       仕様通り画面に1回だけ表示)、削除(`DELETE /api/groups/:name`)。
+     - **リポジトリ別アクセス設定**: `<select>`でリポジトリを選び
+       `GET /api/repos/:name/access`で現在の`AccessConfig`(mode・group・
+       allow_view/download/push・`accounts`マップ)を読み込んでフォームへ
+       反映、編集後`PUT /api/repos/:name/access`で保存。`accounts`マップの
+       各エントリ(閲覧/DL/push個別許可)も行として表示・削除・追加編集
+       可能。**`rust_json`の`light`モジュールはパース専用でシリアライズ
+       APIを持たない**ため、送信JSONは`auth::json_escape`
+       (今回`pub(crate)`化)を使った手組み文字列で構築(既存の
+       OTPリクエスト構築と同じ手法をアクセス設定という複雑なネスト
+       構造にも拡張)。
+  2. **`RGIT_ACCOUNTS_LOCKED`の403を明示表示**: `add_account`・
+     `decide_access_request`(承認時)が返す403(「管理者メール以外は
+     現状受け付けない」)を、それぞれのエラー表示領域(`#admin-error`)に
+     そのままメッセージとして出す(黙って失敗させない、というタスク
+     要件通り)。401/403は「管理者ログインが必要です」、それ以外の
+     ステータスはstatusコードと本文をそのまま表示。
+  3. **`web/Cargo.toml`**: `web-sys` featuresに`HtmlSelectElement`・
+     `HtmlCollection`を追加(モードのプルダウン取得、アカウント行の
+     動的追加・走査用)。
+  4. **`static/index.html`**: `#admin-panel`(ログイン中は表示、
+     `admin::refresh_all()`が`auth::stored_email()`の有無で判定)配下に
+     4セクションのマークアップを追加。
+  5. **検証**:
+     - `cargo build --target wasm32-unknown-unknown --release`
+       **警告0件で成功**。`wasm-bindgen --target web --no-typescript
+       --out-dir static`でJSグルー再生成、`.wasm`は284KB(旧262KBから
+       管理UI分増加)。
+     - `cargo test`(ワークスペース、ネイティブ)**15件全green**(既存の
+       access/auth/capacityテストのみ、今回のWASM側追加に伴うネイティブ
+       側ロジック変更は無いためテスト数は変わらず)。
+     - `cargo build --release`(サーバー本体)成功。
+     - ローカルで`RGIT_DATA_DIR`・`RGIT_ADMIN_EMAIL=norukia.jp@gmail.com`・
+       `RGIT_ACCOUNTS_LOCKED=false`でサーバーを起動し、Claude Browser
+       paneで`http://127.0.0.1:8099/ui/index.html`を開いて確認: ページが
+       コンソールエラー無しで読み込まれ、未ログイン時は管理パネルが
+       非表示、`localStorage`にダミーのメール/トークンを注入して
+       ログイン中の見た目にすると管理パネルの4セクションが正しく描画
+       されることを確認。
+     - **未検証・正直な開示**: (a) SMTP未設定のため実OTPログインができず、
+       **有効なセッショントークンでの管理パネルのフルE2E(実際に申請を
+       承認・アカウント追加・グループ作成・アクセス設定保存が成功する
+       ところまで)は未検証**。ダミートークンでの検証では、各`fetch`が
+       `auth::BASE_PATH="/rgit"`のハードコードによりローカル環境
+       (`/rgit`マウント無し)では常に404になることをNetwork
+       タブで確認しただけ(これは今回の実装の問題ではなく、既存の
+       固定パス仕様——本番`runo.tokyo/rgit`環境でのみ意味を持つ)。
+       (b) 各`fetch`のURL/メソッド/ボディ形状は`src/main.rs`の該当
+       ハンドラのコードを直接読んで突き合わせただけで、`curl`での
+       ステータス確認(401系のみ)に留まり、管理者トークンでの200系
+       応答は未確認。次回はSMTPが許容されるタイミングで、実ログイン→
+       各画面の実操作(申請承認・アカウント追加・グループ作成・
+       アクセス設定保存)まで通しで検証すること。
+     - VPSへの再デプロイは今回未実施(次項参照)。
+  - 次にすべきこと: (1) 実SMTP環境でのフルE2E(上記未検証(a)(b))、
+    (2) `can_create_repos`を個別に読み出すAPI追加(現状は書き込みのみ)、
+    (3) VPS本番への再デプロイ、(4) 保留中の外部バックアップ同期
+    スクリプトへのRGit組み込み。
 ---
 
 ## エコシステム全体マップ(2026-07-21追記)

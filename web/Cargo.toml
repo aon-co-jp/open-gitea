@@ -36,6 +36,8 @@ features = [
     "Storage",
     "DomTokenList",
     "HtmlInputElement",
+    "HtmlSelectElement",
+    "HtmlCollection",
     "console",
 ]
 
