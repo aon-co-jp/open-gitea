@@ -1,4 +1,3 @@
 **/target
 /data
-/data-test*
-/data-authtest
+/data-*

@@ -43,18 +43,11 @@ impl std::fmt::Display for MailError {
     }
 }
 
-fn build_and_send(config: &SmtpConfig, to: &str, code: &str) -> Result<(), MailError> {
-    let body = format!(
-        "RGit ログイン用ワンタイムパスワード\n\n\
-         コード: {code}\n\
-         このコードは5分間有効です。\n\n\
-         心当たりがない場合はこのメールを無視してください。"
-    );
-
+fn build_and_send(config: &SmtpConfig, to: &str, subject: &str, body: String) -> Result<(), MailError> {
     let email = Message::builder()
         .from(config.from.parse().map_err(|e| MailError::Build(format!("{e}")))?)
         .to(to.parse().map_err(|e| MailError::Build(format!("{e}")))?)
-        .subject("RGit ログインコード")
+        .subject(subject)
         .header(ContentType::TEXT_PLAIN)
         .body(body)
         .map_err(|e| MailError::Build(format!("{e}")))?;
@@ -68,5 +61,52 @@ fn build_and_send(config: &SmtpConfig, to: &str, code: &str) -> Result<(), MailE
 }
 
 pub async fn send_otp(config: SmtpConfig, to: String, code: String) -> Result<(), MailError> {
-    tokio::task::spawn_blocking(move || build_and_send(&config, &to, &code)).await.map_err(|e| MailError::Send(format!("task panicked: {e}")))?
+    let body = format!(
+        "RGit ログイン用ワンタイムパスワード\n\n\
+         コード: {code}\n\
+         このコードは5分間有効です。\n\n\
+         心当たりがない場合はこのメールを無視してください。"
+    );
+    tokio::task::spawn_blocking(move || build_and_send(&config, &to, "RGit ログインコード", body))
+        .await
+        .map_err(|e| MailError::Send(format!("task panicked: {e}")))?
+}
+
+/// 誰かが`POST /api/accounts/request`でアクセス許可を申請したことを
+/// 管理者へ通知する。
+pub async fn send_access_request_notice(
+    config: SmtpConfig,
+    admin_email: String,
+    request_email: String,
+    repo: Option<String>,
+    message: Option<String>,
+) -> Result<(), MailError> {
+    let repo_line = repo.as_deref().unwrap_or("(指定なし・アカウント全体)");
+    let message_line = message.as_deref().unwrap_or("(メッセージなし)");
+    let body = format!(
+        "RGitへのアクセス許可申請が届きました。\n\n\
+         申請者メール: {request_email}\n\
+         対象リポジトリ: {repo_line}\n\
+         メッセージ: {message_line}\n\n\
+         管理者としてログインし、GET /api/accounts/requests で申請一覧を確認、\n\
+         POST /api/accounts/requests/:id/decide で閲覧/ダウンロード/push を\n\
+         個別に選んで許可・不許可を決定してください。"
+    );
+    tokio::task::spawn_blocking(move || build_and_send(&config, &admin_email, "RGit アクセス許可申請", body))
+        .await
+        .map_err(|e| MailError::Send(format!("task panicked: {e}")))?
+}
+
+/// アクセス許可申請の審査結果(承認/却下)を申請者へ通知する。
+pub async fn send_access_decision(config: SmtpConfig, to: String, approved: bool, repo: Option<String>) -> Result<(), MailError> {
+    let repo_line = repo.as_deref().unwrap_or("アカウント全体");
+    let body = if approved {
+        format!("RGitへのアクセス申請({repo_line})が承認されました。付与された権限の範囲でログイン・操作が可能です。")
+    } else {
+        format!("RGitへのアクセス申請({repo_line})は承認されませんでした。")
+    };
+    let subject = if approved { "RGit アクセス申請: 承認されました" } else { "RGit アクセス申請: 却下されました" };
+    tokio::task::spawn_blocking(move || build_and_send(&config, &to, subject, body))
+        .await
+        .map_err(|e| MailError::Send(format!("task panicked: {e}")))?
 }

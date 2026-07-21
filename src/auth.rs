@@ -1,9 +1,10 @@
-//! 固定管理者メールアドレス宛のワンタイムパスワード(OTP)認証。
+//! メールアドレス宛のワンタイムパスワード(OTP)認証。
 //! [`open-easy-web`](https://github.com/aon-co-jp/open-easy-web)の
 //! `server/src/auth.rs`と同じ設計(固定パスワード非保存、OTPは
-//! SHA-256ハッシュのみ保持)を踏襲。RGitは複数アカウント登録機能を
-//! 持たないGitサーバーのため、`UserStore`相当は無く、環境変数
-//! `RGIT_ADMIN_EMAIL`で指定した単一アドレスのみがログイン対象。
+//! SHA-256ハッシュのみ保持)を踏襲。ログイン対象は`RGIT_ADMIN_EMAIL`
+//! (管理者)、または管理者が[`crate::accounts`]で許可登録した
+//! メールアドレスのみ(検証は呼び出し側`main.rs`が行う——この構造体
+//! 自体はどのメールアドレスに対しても使える汎用OTP機構)。
 
 use rand::Rng;
 use sha2::{Digest, Sha256};
@@ -39,6 +40,7 @@ struct PendingOtp {
 }
 
 struct Session {
+    email: String,
     expires_at: Instant,
 }
 
@@ -82,21 +84,24 @@ impl AuthStore {
         Ok(())
     }
 
-    pub fn create_session(&self) -> String {
+    /// `email`に対するセッションを発行する(このメールアドレスが管理者・
+    /// 登録済みアカウントいずれであるかの判定は呼び出し側の責務)。
+    pub fn create_session(&self, email: &str) -> String {
         let token = generate_token();
-        self.sessions.lock().unwrap().insert(token.clone(), Session { expires_at: Instant::now() + SESSION_TTL });
+        self.sessions.lock().unwrap().insert(token.clone(), Session { email: email.to_string(), expires_at: Instant::now() + SESSION_TTL });
         token
     }
 
-    /// トークンが有効なセッションかどうかを返す(期限切れなら破棄しfalse)。
-    pub fn is_valid(&self, token: &str) -> bool {
+    /// 有効なセッションに紐づくメールアドレスを返す(期限切れなら破棄し
+    /// `None`)。
+    pub fn session_email(&self, token: &str) -> Option<String> {
         let mut sessions = self.sessions.lock().unwrap();
-        let Some(session) = sessions.get(token) else { return false };
+        let session = sessions.get(token)?;
         if Instant::now() > session.expires_at {
             sessions.remove(token);
-            return false;
+            return None;
         }
-        true
+        Some(session.email.clone())
     }
 
     pub fn logout(&self, token: &str) {
@@ -132,8 +137,8 @@ mod tests {
         let store = AuthStore::default();
         let RequestOtpOutcome::Issued(code) = store.request_otp("admin@example.com");
         store.consume_otp("admin@example.com", &code).unwrap();
-        let token = store.create_session();
-        assert!(store.is_valid(&token));
+        let token = store.create_session("admin@example.com");
+        assert_eq!(store.session_email(&token).as_deref(), Some("admin@example.com"));
     }
 
     #[test]
@@ -162,14 +167,27 @@ mod tests {
         let store = AuthStore::default();
         let RequestOtpOutcome::Issued(code) = store.request_otp("admin@example.com");
         store.consume_otp("admin@example.com", &code).unwrap();
-        let token = store.create_session();
+        let token = store.create_session("admin@example.com");
         store.logout(&token);
-        assert!(!store.is_valid(&token));
+        assert!(store.session_email(&token).is_none());
     }
 
     #[test]
     fn unknown_token_is_invalid() {
         let store = AuthStore::default();
-        assert!(!store.is_valid("does-not-exist"));
+        assert!(store.session_email("does-not-exist").is_none());
+    }
+
+    #[test]
+    fn different_accounts_get_independent_sessions() {
+        let store = AuthStore::default();
+        let RequestOtpOutcome::Issued(admin_code) = store.request_otp("admin@example.com");
+        let RequestOtpOutcome::Issued(member_code) = store.request_otp("member@example.com");
+        store.consume_otp("admin@example.com", &admin_code).unwrap();
+        store.consume_otp("member@example.com", &member_code).unwrap();
+        let admin_token = store.create_session("admin@example.com");
+        let member_token = store.create_session("member@example.com");
+        assert_eq!(store.session_email(&admin_token).as_deref(), Some("admin@example.com"));
+        assert_eq!(store.session_email(&member_token).as_deref(), Some("member@example.com"));
     }
 }

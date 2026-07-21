@@ -4,9 +4,13 @@
 `CLAUDE.md`を正本とし、各プロジェクトへコピーして同期する方針に準じる。
 GitHubリポジトリ: [aon-co-jp/RGit](https://github.com/aon-co-jp/RGit)。
 
-> ⚠️ **正直な開示(最重要)**: v0.1.0時点では、git smart HTTPプロトコル
-> によるclone/push/fetchのみを実装。Gitea/GitBucketが持つWeb UI・Issue・
-> Pull Request・Wiki・ユーザー認証・Webhookは一切無い。`README.md`参照。
+> ⚠️ **正直な開示(最重要、2026-07-21更新)**: git smart HTTPプロトコル
+> によるclone/push/fetch、OTPログイン(管理者+登録アカウント)、
+> リポジトリ単位のアクセス制御(private/public/group/アカウント個別、
+> 閲覧・ダウンロード・push個別許可)、自己申請フローまで実装済み。
+> Gitea/GitBucketが持つIssue・Pull Request・Wiki・Webhookはまだ無い。
+> Web UI側もログイン画面・アクセス許可設定画面はまだ無い(現状APIのみ、
+> `curl`での動作確認止まり)。`README.md`参照。
 
 ## このプロジェクトの役割
 
@@ -122,3 +126,71 @@ CGIプログラム)をサブプロセスとして起動し、HTTPリクエスト
     (現状はWeb UI操作のみ保護、モジュールdoc参照)、(3) VPSへの
     再デプロイ(認証・RJSON統合を反映した最新版)、(4) 保留中の
     外部バックアップ同期スクリプトへの組み込み。
+
+- **2026-07-21(続き) アクセス制御の大幅拡張: private/public/group/
+  アカウント個別許可、閲覧・ダウンロード・push個別許可、自己申請フロー、
+  git push自体への認証を実装・実機検証**(ユーザー指示の積み重ね:
+  「管理者が許可すればREADME/ファイルを誰でも閲覧・DL・ZIP可能に」→
+  「グループ/チーム単位でも」→「登録アカウント制+push権限も」→
+  「誰でも申請できて管理者がメールで気づいて許可・不許可を選べる」)。
+  1. **`src/access.rs`新設**: `AccessConfig`(`mode: private/public/group`、
+     `allow_view`/`allow_download`/`allow_push`、`accounts:
+     HashMap<email, AccountPermission>`)。管理者ログイン済みは常に許可、
+     それ以外は`mode`のルール(public=誰でも、group=共有招待トークン
+     一致)またはアカウント個別許可のどちらかで判定
+     (`access::is_allowed`、単体テスト9件でprivate/public/group/
+     アカウント個別/push許可の組み合わせを検証)。
+  2. **`src/accounts.rs`新設**: 登録メールアドレス管理
+     (`.rgit-accounts.json`)+自己申請(`AccessRequest`、
+     `POST /api/accounts/request`は認証不要で誰でも送れる)。
+  3. **`src/auth.rs`拡張**: `Session`にメールアドレスを持たせ、
+     `create_session(email)`/`session_email(token)`に変更(旧:
+     管理者1名専用→どのメールでもログインできる汎用OTP機構に)。
+  4. **管理者専用API**: グループ作成/一覧/削除(`/api/groups*`)、
+     アカウント追加/一覧/削除(`/api/accounts`)、申請一覧・審査
+     (`/api/accounts/requests*`、`decide`で閲覧/DL/push を個別に選んで
+     承認・却下)。すべて`require_admin_session`(セッションのメールが
+     `RGIT_ADMIN_EMAIL`と一致)でガード。
+  5. **git smart HTTP自体への認証を実装**(これまでの既知の制限を解消):
+     `git_get`/`git_post`が`PATH_INFO`からリポジトリ名と
+     clone/pull(`git-upload-pack`→`Need::Download`)/push
+     (`git-receive-pack`→`Need::Push`)を判定し、ディスパッチ前に権限
+     チェックする。**実装中に発見した重要な罠**: gitクライアントは
+     `403`では認証情報を送り直さず、`401`+`WWW-Authenticate`ヘッダを
+     受け取って初めてBasic認証を試みる仕様——最初`403`を返す実装にして
+     しまい、認証情報付きpushが延々`403`になるバグを実機検証で発見・
+     修正(`git_access_error`関数、資格情報無し→`401`+
+     `WWW-Authenticate: Basic realm="RGit"`、資格情報ありで権限不足
+     →`403`、と使い分けた)。
+  6. **git CLI向け認証方式**: `Authorization: Basic
+     base64(email:セッショントークン)`をサポート(`session_identity`が
+     `Bearer`と`Basic`両方を解釈)。`git remote set-url`でURLに
+     `email:token@host`を埋め込む運用で、追加ツール無しに
+     `git clone`/`git push`が認証付きで行える。
+  7. **実機E2E検証(モックではなく実際の`git`コマンド・実SMTP)**:
+     非公開リポジトリへの匿名`git push`→`401`(WWW-Authenticate付き)、
+     管理者Basic認証での`git push`→成功→別クローンで内容確認、
+     リポジトリを`public`(閲覧・DL許可・push不許可)に変更→匿名`git
+     clone`は成功・匿名`git push`は依然`401`拒否、を確認。
+     **検証中に発生した紛らわしい現象**: 一度Basic認証成功後、Windows
+     Git Credential Manager(`credential.helper=manager`)が資格情報を
+     キャッシュし、別ディレクトリでの「匿名のはずのclone」が
+     管理者権限で成功してしまい、一瞬「権限チェックが機能していない」
+     ように見えた——原因はサーバー側ではなくクライアント側のGCM
+     キャッシュと特定し、`git -c credential.helper=`で無効化してから
+     再検証し、正しく拒否されることを確認した(この教訓を記録:
+     このエコシステムで今後同様のテストをする際、GCM等の資格情報
+     キャッシュを疑うこと)。
+  8. **未検証のまま保留(ユーザーが離席中はメール送信を控える指示のため)**:
+     自己申請→管理者審査(`decide_access_request`)のフルE2Eは、
+     管理者ログイン自体が実OTPメール送信を要するため、このパスでは
+     実行しなかった。申請の保存(`POST /api/accounts/request`、認証
+     不要でメールも飛ばないSMTP未設定インスタンスで検証済み)と
+     `decide_access_request`のコードレビュー(承認時のみアカウント
+     登録+リポジトリ`access`設定への書き込み、却下時は申請削除のみ、
+     SMTP未設定なら送信をスキップ)までは確認済み。
+  - 次にすべきこと: (1) `decide_access_request`の実ログイン込みE2E検証
+    (次回、メール送信が許容されるタイミングで)、(2) WASM側UI
+    (ログイン・アクセス許可設定・申請一覧・グループ管理の画面が
+    すべて未着手)、(3) VPSへの再デプロイ、(4) 保留中の外部バックアップ
+    同期スクリプトへのRGit組み込み。

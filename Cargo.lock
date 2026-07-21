@@ -832,6 +832,7 @@ name = "rgit"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "base64",
  "lettre",
  "poem",
  "rand",
