@@ -1,0 +1,75 @@
+name: Release binaries
+
+# タグ(例: v0.1.0)をpushすると、Linux(全ディストリ共通の静的musl
+# バイナリ)・Windows(x86_64)向けにビルドし、GitHub Releasesへ添付する。
+# AlmaLinux/Ubuntu/Debian/Fedora/RHEL等どのLinuxディストリでも、
+# muslターゲットの静的バイナリなら追加ライブラリ無しでそのまま動く
+# (glibcバージョン差異による非互換を避けるための選択)。
+# WASM UI(static/配下、リポジトリにビルド済み成果物としてコミット済み)も
+# 同梱する。
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  build-linux:
+    name: Linux (musl, 全ディストリ共通)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install musl target
+        run: |
+          rustup target add x86_64-unknown-linux-musl
+          sudo apt-get update && sudo apt-get install -y musl-tools
+      - name: Build
+        run: cargo build --release --target x86_64-unknown-linux-musl --bin rgit
+      - name: Package
+        run: |
+          mkdir -p dist
+          cp target/x86_64-unknown-linux-musl/release/rgit dist/rgit
+          cp install.sh dist/install.sh
+          cp -r static dist/static
+          tar -czf rgit-linux-x86_64.tar.gz -C dist rgit install.sh static
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rgit-linux-x86_64
+          path: rgit-linux-x86_64.tar.gz
+
+  build-windows:
+    name: Windows (x86_64、Windows Server含む)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: cargo build --release --target x86_64-pc-windows-msvc --bin rgit
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist
+          Copy-Item target/x86_64-pc-windows-msvc/release/rgit.exe dist/
+          Copy-Item install.ps1 dist/
+          Copy-Item static dist/static -Recurse
+          Compress-Archive -Path dist/* -DestinationPath rgit-windows-x86_64.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rgit-windows-x86_64
+          path: rgit-windows-x86_64.zip
+
+  release:
+    name: GitHub Releaseへ添付
+    needs: [build-linux, build-windows]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/download-artifact@v4
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            rgit-linux-x86_64/rgit-linux-x86_64.tar.gz
+            rgit-windows-x86_64/rgit-windows-x86_64.zip
