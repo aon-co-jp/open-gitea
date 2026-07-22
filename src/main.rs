@@ -133,10 +133,23 @@ async fn check_access(req: &Request, state: &AppState, repo_path: &Path, need: a
     }
 }
 
+/// デモ用アカウントの固定識別子。実在のメールアドレスと衝突しないよう
+/// `.invalid`(RFC 2606で予約された、実在解決されないTLD)を使う。
+/// このIDでログインしたセッションは、閲覧(View)・ダウンロード(Download)
+/// のみ常に許可し、push(Push)は各リポジトリの設定に関わらず**常に拒否**
+/// する(ユーザー指示、2026-07-22: 「だれでもログイン出来ても...pushなどは
+/// 出来ない仕様」)。管理操作(アカウント/グループ管理等)は
+/// `require_admin_session`が別途`admin_email`と一致するかを見るため、
+/// デモIDでは通らない(追加の分岐不要)。
+const DEMO_IDENTITY: &str = "demo@rgit.invalid";
+
 async fn is_allowed_for_git(req: &Request, state: &AppState, repo_path: &Path, need: access::Need) -> bool {
     let identity = session_identity(req, state);
     if identity.as_deref() == Some(state.admin_email.as_str()) {
         return true;
+    }
+    if identity.as_deref() == Some(DEMO_IDENTITY) {
+        return matches!(need, access::Need::View | access::Need::Download);
     }
     let config = access::load(repo_path).await;
     let groups = access::load_groups(&state.repos_root).await;
@@ -621,6 +634,20 @@ async fn verify_otp(state: Data<&AppState>, body: poem::web::Json<VerifyOtpReque
     }
 }
 
+/// `POST /api/auth/demo-login` — OTP不要で誰でも即座にログインできる
+/// デモ用エンドポイント。一般公開デモンストレーション向け(ユーザー指示、
+/// 2026-07-22)。発行されるセッションは[`DEMO_IDENTITY`]に紐づき、
+/// 閲覧・ダウンロード・README閲覧は可能だが**push・管理操作は一切
+/// できない**(`is_allowed_for_git`・`require_admin_session`で拒否)。
+#[handler]
+async fn demo_login(state: Data<&AppState>) -> PoemResult<Response> {
+    let token = state.auth.create_session(DEMO_IDENTITY);
+    Ok(Response::builder()
+        .status(poem::http::StatusCode::OK)
+        .content_type("application/json")
+        .body(serde_json::to_vec(&VerifyOtpResponse { token }).unwrap_or_default()))
+}
+
 /// `POST /api/auth/logout` — セッショントークンを失効させる。
 #[handler]
 async fn logout(req: &Request, state: Data<&AppState>) -> PoemResult<Response> {
@@ -1094,6 +1121,7 @@ fn build_routes(state: AppState, static_dir: &str) -> impl poem::Endpoint {
         .at("/api/repos/:name/raw/*filepath", get(get_raw_file))
         .at("/api/auth/request-otp", post(request_otp))
         .at("/api/auth/verify-otp", post(verify_otp))
+        .at("/api/auth/demo-login", post(demo_login))
         .at("/api/auth/logout", post(logout))
         .at("/api/groups", get(list_groups).post(create_group))
         .at("/api/groups/:name", poem::delete(delete_group))

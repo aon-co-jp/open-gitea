@@ -25,6 +25,10 @@
   #intro .downloads { display: flex; gap: .75rem; flex-wrap: wrap; margin-top: .75rem; }
   #intro .downloads a { display: inline-block; text-decoration: none; background: #0969da; color: #fff; border-radius: 6px; padding: .4rem 1rem; font-size: .9em; }
   #intro .note { color: #666; font-size: .85em; margin-top: .5rem; }
+  .auth-label { font-weight: 600; color: #444; }
+  .auth-sep { color: #ccc; }
+  #btn-demo-login { background: #2f6fed; color: #fff; border: none; border-radius: 4px; padding: .3rem .7rem; }
+  #demo-cycle-banner { background: #eef2ff; border: 1px solid #b6c3f0; border-radius: 6px; padding: .5rem .75rem; margin-bottom: .75rem; font-size: .9em; }
 </style>
 </head>
 <body>
@@ -47,10 +51,13 @@
 </section>
 <div id="auth-bar">
   <div id="auth-anon">
+    <span class="auth-label">🔑 管理者用ログイン:</span>
     <input id="login-email" type="email" placeholder="メールアドレス" size="24">
     <button id="btn-request-otp" type="button">OTP送信</button>
     <input id="login-code" type="text" placeholder="コード" size="8" class="hidden">
     <button id="btn-verify-otp" type="button" class="hidden">ログイン</button>
+    <span class="auth-sep">|</span>
+    <button id="btn-demo-login" type="button">👤 だれでもログイン(デモ用)</button>
   </div>
   <div id="auth-logged-in" class="hidden">
     <span id="auth-email"></span>
@@ -129,6 +136,97 @@
 <script type="module">
   import init from "./rgit_web.js";
   init();
+</script>
+<script>
+// デモ用ログイン + 自動デモ切り替え(ユーザー指示、2026-07-22)。
+// WASM本体(rgit_web.js)とは独立した素のJSで実装し、認証は
+// localStorage(rgit_token/rgit_email)を共有するだけに留める
+// (WASM側が起動時にこれを読み取り、以後は通常ログインと同じ扱いで
+// 動作する)。
+(function () {
+  var API_BASE = "/rgit";
+  var CYCLE_INTERVAL_MS = 10000; // 「適当な時間」= 10秒間隔で切り替え
+
+  function markUserInteracted() {
+    userInteracted = true;
+    if (cycleTimer) { clearInterval(cycleTimer); cycleTimer = null; }
+    var banner = document.getElementById("demo-cycle-banner");
+    if (banner) { banner.remove(); }
+  }
+
+  var demoBtn = document.getElementById("btn-demo-login");
+  if (demoBtn) {
+    demoBtn.addEventListener("click", async function () {
+      markUserInteracted();
+      try {
+        var res = await fetch(API_BASE + "/api/auth/demo-login", { method: "POST" });
+        if (!res.ok) { throw new Error("status " + res.status); }
+        var data = await res.json();
+        localStorage.setItem("rgit_token", data.token);
+        localStorage.setItem("rgit_email", "demo@rgit.invalid");
+        location.reload();
+      } catch (e) {
+        var errEl = document.getElementById("auth-error");
+        if (errEl) { errEl.textContent = "デモログインに失敗しました: " + e.message; }
+      }
+    });
+  }
+  ["btn-request-otp", "btn-verify-otp", "btn-logout"].forEach(function (id) {
+    var el = document.getElementById(id);
+    if (el) { el.addEventListener("click", markUserInteracted); }
+  });
+
+  var userInteracted = false;
+  var cycleTimer = null;
+
+  // 一般公開デモンストレーション向け: 実際にログインしている人が
+  // いなければ、ログイン前の画面とデモアカウントでログイン後の画面を
+  // 一定間隔で自動的に切り替えて見せる(閲覧・ダウンロード・README閲覧の
+  // みでpushは出来ないデモアカウント、ユーザー指示 2026-07-22)。
+  // 手動でログイン/デモログイン/ログアウトを操作した瞬間に自動切り替えは
+  // 停止する。
+  if (!localStorage.getItem("rgit_token")) {
+    var banner = document.createElement("div");
+    banner.id = "demo-cycle-banner";
+    banner.textContent = "👤 デモ表示: ログイン前の画面です(数秒後、自動でログイン後の画面に切り替わります)";
+    document.body.insertBefore(banner, document.getElementById("intro"));
+
+    var demoOn = false;
+    cycleTimer = setInterval(async function () {
+      if (userInteracted) { return; }
+      demoOn = !demoOn;
+      if (demoOn) {
+        try {
+          var res = await fetch(API_BASE + "/api/auth/demo-login", { method: "POST" });
+          if (!res.ok) { throw new Error("status " + res.status); }
+          var data = await res.json();
+          sessionStorage.setItem("rgit_auto_demo", "1");
+          localStorage.setItem("rgit_token", data.token);
+          localStorage.setItem("rgit_email", "demo@rgit.invalid");
+        } catch (e) { return; }
+      } else {
+        sessionStorage.removeItem("rgit_auto_demo");
+        localStorage.removeItem("rgit_token");
+        localStorage.removeItem("rgit_email");
+      }
+      location.reload();
+    }, CYCLE_INTERVAL_MS);
+  } else if (sessionStorage.getItem("rgit_auto_demo") === "1") {
+    // 自動デモがログイン後表示のフェーズで再読み込みされた状態。
+    // 次のタイマーでログイン前表示へ戻すため、同じ間隔で再度切り替える。
+    setTimeout(function () {
+      if (userInteracted) { return; }
+      sessionStorage.removeItem("rgit_auto_demo");
+      localStorage.removeItem("rgit_token");
+      localStorage.removeItem("rgit_email");
+      location.reload();
+    }, CYCLE_INTERVAL_MS);
+    var banner2 = document.createElement("div");
+    banner2.id = "demo-cycle-banner";
+    banner2.textContent = "🔑 デモ表示: ログイン後の画面です(誰でも閲覧・ダウンロード可、push・管理操作は管理者のみ)";
+    document.body.insertBefore(banner2, document.getElementById("intro"));
+  }
+})();
 </script>
 </body>
 </html>
