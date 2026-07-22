@@ -11,6 +11,22 @@ GitHubリポジトリ: [aon-co-jp/RGit](https://github.com/aon-co-jp/RGit)。
 > (`<name>.wiki.git`という兄弟bareリポジトリ、閲覧はWeb UI、編集は
 > `git clone`/`git push`)まで実装済み。Gitea/GitBucketが持つ
 > Issue・Pull Request・Webhookはまだ無い。`README.md`参照。
+>
+> **外部バックアップ同期スクリプトの組み込み状況(2026-07-22更新)**:
+> 以前このCLAUDE.mdで繰り返し「保留中」としていた項目は、
+> [aon-co-jp/RS-Sync](https://github.com/aon-co-jp/RS-Sync)(`F:\runo\rs-sync`)
+> というプロジェクトとして着手済み。RS-SyncはRGitを「プロバイダ」の
+> 1つとして実装しており(`GET /api/repos`でのリポジトリ一覧取得、
+> `PUT /repos/:name`でのリポジトリ作成、標準git smart-HTTPでの
+> clone/push)、GitHub⇄RGit間の一方向バックアップ同期・双方向同期を
+> スケジュール実行できる汎用Webアプリとして`https://runo.tokyo/rs-sync`
+> で稼働中。ただしRGitプロバイダ自体は実機(本番RGitインスタンス)に
+> 対しては未検証(GitHubプロバイダのみ実機検証済み、RGit向けAPI呼び出しは
+> ローカルのfilesystemプロバイダでのテストのみ)——RGit側にAPIキー認証等の
+> 変更が今後入る場合は、RS-Sync側の`RGitProvider`(`rs-sync`リポジトリ
+> `src/provider.rs`)の追従が必要になる点に留意。既存の`/root/sync-repos.sh`
+> (cron)は当面併存させる方針で、RGitの`git http-backend`実装自体への
+> 変更は今回行っていない。
 
 ## このプロジェクトの役割
 
@@ -65,7 +81,11 @@ CGIプログラム)をサブプロセスとして起動し、HTTPリクエスト
     開いてログインフォーム・容量表示が正しく描画されること(Claude
     Browser pane等での確認は未実施、curlでのHTML取得のみ)、
     (2) アクセス許可設定・申請一覧・グループ管理UIの実装、
-    (3) 保留中の外部バックアップ同期スクリプトへのRGit組み込み。
+    (3) ~~保留中の外部バックアップ同期スクリプトへのRGit組み込み~~
+    →2026-07-22、[aon-co-jp/RS-Sync](https://github.com/aon-co-jp/RS-Sync)
+    として着手・`https://runo.tokyo/rs-sync`で稼働開始(冒頭の正直な開示
+    ブロック参照)。残課題はRGitプロバイダの実機(本番RGitインスタンス)
+    検証。
 
 - **2026-07-21 新規作成・実機検証**: `runo-forge`という仮称で開発を
   開始した後、`aon-co-jp/RGit`という既存の空リポジトリ(説明文
