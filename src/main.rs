@@ -51,6 +51,7 @@ mod auth;
 mod capacity;
 mod issues;
 mod mail;
+mod releases;
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -438,6 +439,27 @@ async fn get_readme(req: &Request, PathExtractor(name): PathExtractor<String>, s
         .status(poem::http::StatusCode::OK)
         .content_type("application/json")
         .body(serde_json::to_vec(&payload).unwrap_or_default()))
+}
+
+/// `GET /api/repos/:name/releases` — 実Gitea(about.gitea.com)との
+/// 機能差分解消の一環(2026-07-27追記)。gitタグ自体をリリース一覧の
+/// 実体として扱う(`releases`モジュールdoc参照)。タグが1つも無い
+/// リポジトリではエラーではなく空配列を返す(`get_wiki_pages`と同じ
+/// 「まだ何も無い」の扱い方)。
+#[handler]
+async fn get_releases(req: &Request, PathExtractor(name): PathExtractor<String>, state: Data<&AppState>) -> PoemResult<Response> {
+    let repo_dir_name = sanitize_repo_name(&name)?;
+    let repo_path = state.repos_root.join(&repo_dir_name);
+    if !repo_path.exists() {
+        return Ok(Response::builder().status(poem::http::StatusCode::NOT_FOUND).body("repository not found"));
+    }
+    check_access(req, &state, &repo_path, access::Need::View).await?;
+
+    let releases = releases::list(&repo_path).await;
+    Ok(Response::builder()
+        .status(poem::http::StatusCode::OK)
+        .content_type("application/json")
+        .body(serde_json::to_vec(&releases).unwrap_or_default()))
 }
 
 /// `GET /api/repos/:name/wiki` — Wikiページ名の一覧(`<name>.wiki.git`の
@@ -1458,6 +1480,7 @@ fn build_routes(state: AppState, static_dir: &str) -> impl poem::Endpoint {
         .at("/repos/:name", put(create_repo))
         .at("/api/repos", get(list_repos))
         .at("/api/repos/:name/readme", get(get_readme))
+        .at("/api/repos/:name/releases", get(get_releases))
         .at("/api/repos/:name/wiki", get(get_wiki_pages))
         .at("/api/repos/:name/wiki/:page", get(get_wiki_page))
         .at("/api/repos/:name/issues", get(list_issues).post(create_issue))

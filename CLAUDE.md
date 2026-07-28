@@ -700,3 +700,32 @@ CGIプログラム)をサブプロセスとして起動し、HTTPリクエスト
     milestone表示・編集フォームを追加、(2) Releases(gitタグ一覧・詳細
     API、次の着手候補)、(3) Pull Request(最大の差分、diff表示+マージ、
     より大規模な作業)、(4) Webhooks(push/issueイベントでのHTTP POST)。
+
+## HANDOFF追記(2026-07-27続き2) 実Giteaとの機能差分解消(2): Releases(gitタグ一覧)
+
+1. **新規モジュール`src/releases.rs`**: gitタグ自体をリリース一覧の実体
+   として扱う軽量実装(実Giteaのような独立エンティティ・添付ファイル
+   管理は無し)。`git tag --sort=-creatordate`で新しい順に列挙し、
+   各タグの`commit_sha`(`git rev-list -n 1`)・`created_at`
+   (`git log -1 --format=%aI`)・`message`(annotated tagのみ、
+   `git cat-file -t`で`tag`型と判定できた場合に限り
+   `for-each-ref --format=%(contents)`で取得)を返す。
+2. **`GET /api/repos/:name/releases`エンドポイントを新設**
+   (`Need::View`権限、タグ0件のリポジトリはエラーではなく空配列)。
+3. **実装中に発見・修正した実バグ**: 当初`for-each-ref
+   --format=%(contents)`を無条件に使っていたが、lightweight tag
+   (タグ自身が独立オブジェクトを持たず、単にコミットを指すだけの参照)
+   の場合、このフォーマットは**タグが指すコミット自身のメッセージ**を
+   誤って返してしまう(gitの仕様上の挙動)。自前で書いた単体テスト
+   (`list_returns_annotated_and_lightweight_tags_with_expected_fields`)
+   が実際にこの誤りを検出し、`git cat-file -t`でannotated
+   tag(`tag`型)かlightweight tag(`commit`型)かを判定してから
+   メッセージ取得の要否を分岐する形に修正した。
+4. **検証**: `cargo test`**32件全green**(新規2件含む、回帰無し)。
+5. **正直な開示・未実装**: (1) バイナリ添付ファイルのアップロード・
+   ダウンロード、(2) WASM UI側でのリリース一覧表示、(3) 新規タグの
+   作成自体はAPI経由では未対応(現状は`git push --tags`でリポジトリへ
+   push する既存のgit操作のみ)。
+  - 次にすべきこと: (1) `web/src/lib.rs`のWASM UIにリリース一覧表示を
+    追加、(2) Pull Request(実Giteaとの最大の差分、次の優先候補)、
+    (3) Webhooks。
