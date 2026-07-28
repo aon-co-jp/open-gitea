@@ -667,3 +667,36 @@ CGIプログラム)をサブプロセスとして起動し、HTTPリクエスト
 「関連プロジェクト」節を参照。**どのリポジトリから読み始めても、
 この節を起点に他プロジェクトへ辿れる**ようにしてある(このリポジトリ
 自身の状況はこの上のHANDOFF節を参照)。
+
+## HANDOFF追記(2026-07-27続き) 実Giteaとの機能差分解消(1): Issueにlabels/assignee/milestoneを追加
+
+ユーザー指示「open-giteaと実Gitea(about.gitea.com/Wikipedia)との機能差分
+(Pull Request、Labels/Milestones、Releases、Webhooks等)…実装に着手して」
+への対応(外部監査で洗い出した差分のうち、既存の`Issue`構造体への
+追加フィールドだけで実現できる、最も低リスクな項目から着手)。
+
+1. **`src/issues.rs`の`Issue`構造体に3フィールド追加**: `labels:
+   Vec<String>`(自由記述タグ、色・説明文管理は無し)・`assignee:
+   Option<String>`(担当者メールアドレス1名のみ)・`milestone:
+   Option<String>`(自由記述の名前のみ、期日・進捗率を持つ独立
+   エンティティではない)。いずれも`#[serde(default)]`で既存の
+   `.open-gitea-issues.json`との後方互換を維持。
+2. **`update_metadata()`関数を新設**: 3フィールドを個別に部分更新できる
+   (`Option<T>`で「変更しない」、内側の`Option`で「明示的にNoneへ戻す」
+   を区別する二重Option設計)。
+3. **`PATCH /api/repos/:name/issues/:id/metadata`エンドポイントを新設**
+   (`main.rs`、`Need::Push`権限が必要、既存の`set_issue_status`と同じ
+   アクセス制御パターン)。
+4. **検証**: 新規テスト4件(`update_metadata_sets_labels_assignee_and_
+   milestone_and_persists`・`update_metadata_on_missing_issue_errors`・
+   `loads_pre_existing_issue_json_without_new_fields`〈後方互換確認〉)
+   を追加。`cargo test`**30件全green**(既存26件+新規4件、回帰無し)。
+5. **正直な開示・実Giteaとの残差分**: 今回はデータモデルへのフィールド
+   追加のみで、(a) 色付きLabel管理画面・Label一覧API、(b) 期日・進捗率・
+   説明文を持つ独立したMilestoneエンティティ・Milestone一覧API、
+   (c) WASMブラウザUI側でのlabels/assignee/milestone表示・編集フォーム、
+   はいずれも今回未実装(バックエンドのデータモデル+APIのみ)。
+  - 次にすべきこと: (1) `web/src/lib.rs`のWASM UIにlabels/assignee/
+    milestone表示・編集フォームを追加、(2) Releases(gitタグ一覧・詳細
+    API、次の着手候補)、(3) Pull Request(最大の差分、diff表示+マージ、
+    より大規模な作業)、(4) Webhooks(push/issueイベントでのHTTP POST)。
