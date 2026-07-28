@@ -8,6 +8,14 @@
 //! 系統は持たない)——閲覧は`Need::View`、作成・コメント・ステータス
 //! 変更は`Need::Push`(このリポジトリへの書き込み権を持つ人だけが
 //! Issueも編集できる、という素直な対応付け)。
+//!
+//! **2026-07-27追記(実Gitea〈about.gitea.com〉との機能差分の一部解消)**:
+//! `labels`(自由記述タグ、色・説明文は持たない簡易版)・`assignee`
+//! (担当者メールアドレス1名のみ、複数担当者やチーム割当は非対応)・
+//! `milestone`(自由記述の名前のみ、期日・進捗率を持つ独立エンティティ
+//! ではない)を追加した。実Giteaのような色付きLabel管理画面・
+//! マイルストーン一覧/進捗バーは持たない——あくまで既存のIssue
+//! JSONファイルへのフィールド追加による軽量な近似。
 
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -36,6 +44,22 @@ pub struct Issue {
     pub created_at: String,
     #[serde(default)]
     pub comments: Vec<Comment>,
+    /// 自由記述タグ(実Giteaの色付きLabelとは異なり、色・説明文の管理は
+    /// 持たない簡易版)。`#[serde(default)]`で既存の保存データとの
+    /// 後方互換を維持する(2026-07-27追記、実Gitea機能差分の一部解消)。
+    #[serde(default)]
+    pub labels: Vec<String>,
+    /// 担当者のメールアドレス(未割当なら`None`)。`open-redmine`の
+    /// `assignee`と同じ設計方針(登録済みアカウントかどうかの検証は
+    /// 呼び出し側`main.rs`が行う——このモジュール自体は文字列を
+    /// そのまま保持する汎用フィールド)。
+    #[serde(default)]
+    pub assignee: Option<String>,
+    /// マイルストーン名(自由記述の名前のみ、実Giteaのような期日・進捗率・
+    /// 説明文を持つ独立エンティティではない簡易版——正直な開示として
+    /// モジュールdocに明記)。
+    #[serde(default)]
+    pub milestone: Option<String>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -76,10 +100,55 @@ pub async fn create(repo_path: &Path, title: String, body: String, author: Strin
     let mut store = load(repo_path).await;
     let id = store.next_id;
     store.next_id += 1;
-    let issue = Issue { id, title, body, status: IssueStatus::Open, author, created_at: now(), comments: Vec::new() };
+    let issue = Issue {
+        id,
+        title,
+        body,
+        status: IssueStatus::Open,
+        author,
+        created_at: now(),
+        comments: Vec::new(),
+        labels: Vec::new(),
+        assignee: None,
+        milestone: None,
+    };
     store.issues.push(issue.clone());
     save(repo_path, &store).await?;
     Ok(issue)
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum UpdateIssueError {
+    NotFound,
+}
+
+/// labels/assignee/milestoneをまとめて更新する(`None`は「変更しない」、
+/// 明示的に空へ戻したい場合は`labels: Some(vec![])`/`assignee:
+/// Some(None)`のように二重`Option`で渡す——`main.rs`側のリクエスト
+/// body(`serde_json::Value`)から個別に組み立てる想定)。
+pub async fn update_metadata(
+    repo_path: &Path,
+    id: u64,
+    labels: Option<Vec<String>>,
+    assignee: Option<Option<String>>,
+    milestone: Option<Option<String>>,
+) -> Result<Issue, UpdateIssueError> {
+    let mut store = load(repo_path).await;
+    let Some(issue) = store.issues.iter_mut().find(|i| i.id == id) else {
+        return Err(UpdateIssueError::NotFound);
+    };
+    if let Some(labels) = labels {
+        issue.labels = labels;
+    }
+    if let Some(assignee) = assignee {
+        issue.assignee = assignee;
+    }
+    if let Some(milestone) = milestone {
+        issue.milestone = milestone;
+    }
+    let updated = issue.clone();
+    let _ = save(repo_path, &store).await;
+    Ok(updated)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -168,5 +237,72 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let result = add_comment(dir.path(), 999, "bob@example.com".to_string(), "x".to_string()).await;
         assert!(result.is_none());
+    }
+
+    /// 2026-07-27追記: labels/assignee/milestoneが更新・永続化され、
+    /// `None`を渡したフィールドは変更されない(部分更新)ことを確認する。
+    #[tokio::test]
+    async fn update_metadata_sets_labels_assignee_and_milestone_and_persists() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo_path = dir.path();
+        create(repo_path, "A".to_string(), "".to_string(), "a@x.com".to_string()).await.unwrap();
+
+        let updated = update_metadata(
+            repo_path,
+            0,
+            Some(vec!["bug".to_string(), "priority-high".to_string()]),
+            Some(Some("dev@example.com".to_string())),
+            Some(Some("v1.0".to_string())),
+        )
+        .await
+        .unwrap();
+        assert_eq!(updated.labels, vec!["bug", "priority-high"]);
+        assert_eq!(updated.assignee.as_deref(), Some("dev@example.com"));
+        assert_eq!(updated.milestone.as_deref(), Some("v1.0"));
+
+        let fetched = get(repo_path, 0).await.unwrap();
+        assert_eq!(fetched.labels, vec!["bug", "priority-high"]);
+        assert_eq!(fetched.assignee.as_deref(), Some("dev@example.com"));
+        assert_eq!(fetched.milestone.as_deref(), Some("v1.0"));
+
+        // labelsだけ変更し、assignee/milestoneは`None`渡しで維持されることを確認。
+        let updated2 = update_metadata(repo_path, 0, Some(vec!["bug".to_string()]), None, None).await.unwrap();
+        assert_eq!(updated2.labels, vec!["bug"]);
+        assert_eq!(updated2.assignee.as_deref(), Some("dev@example.com"));
+        assert_eq!(updated2.milestone.as_deref(), Some("v1.0"));
+    }
+
+    #[tokio::test]
+    async fn update_metadata_on_missing_issue_errors() {
+        let dir = tempfile::tempdir().unwrap();
+        let result = update_metadata(dir.path(), 999, Some(vec![]), None, None).await;
+        assert!(matches!(result, Err(UpdateIssueError::NotFound)));
+    }
+
+    /// 既存データとの後方互換: `labels`/`assignee`/`milestone`フィールドを
+    /// 持たない古い形式のJSONも`#[serde(default)]`で正しくロードできる
+    /// ことを確認する(実データの破損防止)。
+    #[tokio::test]
+    async fn loads_pre_existing_issue_json_without_new_fields() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo_path = dir.path();
+        let old_json = serde_json::json!({
+            "next_id": 1,
+            "issues": [{
+                "id": 0,
+                "title": "Old issue",
+                "body": "",
+                "status": "open",
+                "author": "a@x.com",
+                "created_at": "2026-01-01T00:00:00Z",
+                "comments": []
+            }]
+        });
+        tokio::fs::write(issues_path(repo_path), serde_json::to_vec(&old_json).unwrap()).await.unwrap();
+
+        let fetched = get(repo_path, 0).await.unwrap();
+        assert!(fetched.labels.is_empty());
+        assert!(fetched.assignee.is_none());
+        assert!(fetched.milestone.is_none());
     }
 }

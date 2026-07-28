@@ -60,7 +60,7 @@ use poem::listener::TcpListener;
 use poem::middleware::Tracing;
 use poem::web::Data;
 use poem::{
-    handler, get, post, put,
+    handler, get, patch, post, put,
     web::Path as PathExtractor,
     Body, EndpointExt, Request, Response, Result as PoemResult, Route, Server,
 };
@@ -650,6 +650,55 @@ async fn set_issue_status(req: &Request, body: poem::Body, PathExtractor((name, 
     match issues::set_status(&repo_path, id, body.status).await {
         Ok(()) => Ok(Response::builder().status(poem::http::StatusCode::OK).content_type("application/json").body("{\"ok\":true}")),
         Err(issues::SetStatusError::NotFound) => Ok(Response::builder().status(poem::http::StatusCode::NOT_FOUND).body("issue not found")),
+    }
+}
+
+/// `PATCH /api/repos/:name/issues/:id/metadata` — 実Gitea
+/// (about.gitea.com)との機能差分解消の一環(2026-07-27追記)。labels/
+/// assignee/milestoneを部分更新する。各フィールドを省略した場合は
+/// 変更しない(二重`Option`——`assignee`/`milestone`はJSON上
+/// `null`を渡すと明示的に未割当へ戻す設計)。
+#[derive(serde::Deserialize, Default)]
+struct UpdateIssueMetadataRequest {
+    #[serde(default)]
+    labels: Option<Vec<String>>,
+    #[serde(default, deserialize_with = "deserialize_double_option")]
+    assignee: Option<Option<String>>,
+    #[serde(default, deserialize_with = "deserialize_double_option")]
+    milestone: Option<Option<String>>,
+}
+
+/// `{"assignee": null}`(明示的に未割当へ)と、フィールド自体が無い
+/// (変更しない)を区別するためのserde helper(二重`Option`パターン)。
+fn deserialize_double_option<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::Deserialize<'de>,
+{
+    Ok(Some(Option::deserialize(deserializer)?))
+}
+
+#[handler]
+async fn update_issue_metadata(
+    req: &Request,
+    body: poem::Body,
+    PathExtractor((name, id)): PathExtractor<(String, u64)>,
+    state: Data<&AppState>,
+) -> PoemResult<Response> {
+    let repo_dir_name = sanitize_repo_name(&name)?;
+    let repo_path = state.repos_root.join(&repo_dir_name);
+    if !repo_path.exists() {
+        return Ok(Response::builder().status(poem::http::StatusCode::NOT_FOUND).body("repository not found"));
+    }
+    check_access(req, &state, &repo_path, access::Need::Push).await?;
+    let body: UpdateIssueMetadataRequest = read_json_body(body).await?;
+
+    match issues::update_metadata(&repo_path, id, body.labels, body.assignee, body.milestone).await {
+        Ok(issue) => Ok(Response::builder()
+            .status(poem::http::StatusCode::OK)
+            .content_type("application/json")
+            .body(rust_json::full::to_vec_strict(&issue).unwrap_or_default())),
+        Err(issues::UpdateIssueError::NotFound) => Ok(Response::builder().status(poem::http::StatusCode::NOT_FOUND).body("issue not found")),
     }
 }
 
@@ -1413,6 +1462,7 @@ fn build_routes(state: AppState, static_dir: &str) -> impl poem::Endpoint {
         .at("/api/repos/:name/wiki/:page", get(get_wiki_page))
         .at("/api/repos/:name/issues", get(list_issues).post(create_issue))
         .at("/api/repos/:name/issues/:id", get(get_issue).put(set_issue_status))
+        .at("/api/repos/:name/issues/:id/metadata", patch(update_issue_metadata))
         .at("/api/repos/:name/issues/:id/comments", post(create_issue_comment))
         .at("/api/repos/:name/access", get(get_access).put(set_access))
         .at("/api/repos/:name/tree", get(get_tree))
