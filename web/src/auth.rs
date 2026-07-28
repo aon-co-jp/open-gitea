@@ -1,6 +1,6 @@
 //! ログインUI(メールOTP)。`POST /api/auth/{request-otp,verify-otp,logout}`を
-//! `fetch`で叩き、セッショントークンを`localStorage`(キー`rgit_token`・
-//! `rgit_email`)へ保存する。以後の認証付きリクエストは
+//! `fetch`で叩き、セッショントークンを`localStorage`(キー`open_gitea_token`・
+//! `open_gitea_email`)へ保存する。以後の認証付きリクエストは
 //! `Authorization: Bearer <token>`ヘッダを付与する(`authorized_fetch`)。
 //!
 //! JSONパースは`web/src/lib.rs`と同じ方針で`rust_json::parse_light`を使う。
@@ -13,19 +13,19 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{Document, Headers, Request, RequestInit, RequestMode, Response, Storage};
 
-const TOKEN_KEY: &str = "rgit_token";
-const EMAIL_KEY: &str = "rgit_email";
+const TOKEN_KEY: &str = "open_gitea_token";
+const EMAIL_KEY: &str = "open_gitea_email";
 
 /// このデプロイでRGitがマウントされているパス接頭辞
-/// (`https://runo.tokyo/rgit`、2026-07-21)。絶対パスの`fetch`呼び出しは
+/// (`https://runo.tokyo/open-gitea`、2026-07-21)。絶対パスの`fetch`呼び出しは
 /// ブラウザの現在ページのパスと無関係にオリジン直下へ飛ぶため、nginx側で
-/// `/rgit`を剥がしてバックエンドへプロキシしていても、フロントエンドの
+/// `/open-gitea`を剥がしてバックエンドへプロキシしていても、フロントエンドの
 /// 側でこの接頭辞を明示的に付けないと`/api/...`がドメイン直下(接頭辞無し)
 /// を叩いてしまう。**正直な開示**: 現状はこの1箇所にハードコードして
 /// おり、複数のマウント先(例: 別ドメイン・別パス)で同じビルドを使い
 /// 回すことは想定していない——将来必要になれば、ビルド時環境変数や
 /// `index.html`側の設定注入に置き換えること。
-const BASE_PATH: &str = "/rs-git";
+const BASE_PATH: &str = "/open-gitea";
 
 pub fn api_url(path: &str) -> String {
     format!("{BASE_PATH}{path}")

@@ -67,7 +67,7 @@ impl Default for AccessConfig {
 }
 
 fn access_config_path(repo_path: &Path) -> PathBuf {
-    repo_path.join(".rgit-access.json")
+    repo_path.join(".open-gitea-access.json")
 }
 
 /// リポジトリのアクセス設定を読む。ファイルが無い/壊れている場合は
@@ -149,7 +149,7 @@ pub struct GroupStore {
 }
 
 fn groups_path(repos_root: &Path) -> PathBuf {
-    repos_root.join(".rgit-groups.json")
+    repos_root.join(".open-gitea-groups.json")
 }
 
 pub async fn load_groups(repos_root: &Path) -> GroupStore {

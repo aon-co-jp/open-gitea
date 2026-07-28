@@ -1,8 +1,8 @@
-# RS-Git
+# open-gitea
 
 Giteaが持つ機能のうち、まずgit clone/push・OTPログイン・アクセス制御・README閲覧機能だけを実装した、Go言語版GiteaのRust＋RPoem版です。元の機能を素直に移植致しました。自己ホスト型Git forge。
 
-**開発開始日: 2026-07-21**(このリポジトリのGitHub作成日、2026-07-22に`RGit`から`RS-Git`へ改名)
+**開発開始日: 2026-07-21**(このリポジトリのGitHub作成日、2026-07-22に`RGit`から`open-gitea`へ改名)
 
 ## 現状(v0.1.0)
 

@@ -149,7 +149,7 @@ async fn check_access(req: &Request, state: &AppState, repo_path: &Path, need: a
 /// 出来ない仕様」)。管理操作(アカウント/グループ管理等)は
 /// `require_admin_session`が別途`admin_email`と一致するかを見るため、
 /// デモIDでは通らない(追加の分岐不要)。
-const DEMO_IDENTITY: &str = "demo@rgit.invalid";
+const DEMO_IDENTITY: &str = "demo@open-gitea.invalid";
 
 async fn is_allowed_for_git(req: &Request, state: &AppState, repo_path: &Path, need: access::Need) -> bool {
     let identity = session_identity(req, state);
@@ -1287,7 +1287,7 @@ async fn git_http_backend(
         .env("QUERY_STRING", query_string)
         .env("REQUEST_METHOD", method)
         .env("CONTENT_TYPE", content_type)
-        .env("REMOTE_USER", "rgit") // 認証未実装(v0.1.0の既知の制限、モジュールdoc参照)
+        .env("REMOTE_USER", "open-gitea") // 認証未実装(v0.1.0の既知の制限、モジュールdoc参照)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -1446,7 +1446,7 @@ async fn main() -> anyhow::Result<()> {
 
     let repos_root = env_data_dir();
     tokio::fs::create_dir_all(&repos_root).await?;
-    tracing::info!("rgit v0.1.0 starting, repos_root={:?}", repos_root);
+    tracing::info!("open-gitea v0.1.0 starting, repos_root={:?}", repos_root);
 
     let admin_email = std::env::var("RGIT_ADMIN_EMAIL").unwrap_or_else(|_| "admin@example.com".to_string());
     let smtp = mail::SmtpConfig::from_env();
@@ -1486,7 +1486,7 @@ mod handler_tests {
 
     async fn make_state(label: &str) -> AppState {
         let unique = format!("{:?}-{label}", std::time::Instant::now());
-        let repos_root = std::env::temp_dir().join(format!("rgit-handler-test-{}", unique.replace(['{', '}', ':', ' ', '.'], "-")));
+        let repos_root = std::env::temp_dir().join(format!("open-gitea-handler-test-{}", unique.replace(['{', '}', ':', ' ', '.'], "-")));
         tokio::fs::create_dir_all(&repos_root).await.unwrap();
         AppState { repos_root, auth: Arc::new(auth::AuthStore::default()), admin_email: ADMIN_EMAIL.to_string(), smtp: None, accounts_locked: false }
     }
@@ -1626,7 +1626,7 @@ mod handler_tests {
         let (port, handle) = spawn_real_server(state).await;
         let wiki_url = format!("http://127.0.0.1:{port}/proj.wiki.git");
 
-        let work_dir = std::env::temp_dir().join(format!("rgit-wiki-clone-{port}"));
+        let work_dir = std::env::temp_dir().join(format!("open-gitea-wiki-clone-{port}"));
         let _ = tokio::fs::remove_dir_all(&work_dir).await;
         tokio::fs::create_dir_all(&work_dir).await.unwrap();
 
@@ -1658,7 +1658,7 @@ mod handler_tests {
         assert!(push_out.status.success(), "git push failed: {}", String::from_utf8_lossy(&push_out.stderr));
 
         // 3) 別ディレクトリへ再cloneし、実際にpushされた内容が取得できることを確認。
-        let reclone_dir = std::env::temp_dir().join(format!("rgit-wiki-reclone-{port}"));
+        let reclone_dir = std::env::temp_dir().join(format!("open-gitea-wiki-reclone-{port}"));
         let _ = tokio::fs::remove_dir_all(&reclone_dir).await;
         let reclone_out = run_git(None, &["-c", &auth_header, "clone", &wiki_url, reclone_dir.to_str().unwrap()]).await;
         assert!(reclone_out.status.success(), "git re-clone failed: {}", String::from_utf8_lossy(&reclone_out.stderr));
