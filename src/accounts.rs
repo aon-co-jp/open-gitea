@@ -43,7 +43,7 @@ pub struct AccountStore {
 }
 
 fn accounts_path(repos_root: &Path) -> PathBuf {
-    repos_root.join(".rgit-accounts.json")
+    repos_root.join(".open-gitea-accounts.json")
 }
 
 pub async fn load(repos_root: &Path) -> AccountStore {

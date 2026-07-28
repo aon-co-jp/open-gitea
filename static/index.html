@@ -151,13 +151,13 @@
 </div>
 
 <script type="module">
-  import init from "./rgit_web.js";
+  import init from "./open_gitea_web.js";
   init();
 </script>
 <script>
 // デモ用ログイン + 自動デモ切り替え(ユーザー指示、2026-07-22)。
-// WASM本体(rgit_web.js)とは独立した素のJSで実装し、認証は
-// localStorage(rgit_token/rgit_email)を共有するだけに留める
+// WASM本体(open_gitea_web.js)とは独立した素のJSで実装し、認証は
+// localStorage(open_gitea_token/open_gitea_email)を共有するだけに留める
 // (WASM側が起動時にこれを読み取り、以後は通常ログインと同じ扱いで
 // 動作する)。
 (function () {
@@ -179,8 +179,8 @@
         var res = await fetch(API_BASE + "/api/auth/demo-login", { method: "POST" });
         if (!res.ok) { throw new Error("status " + res.status); }
         var data = await res.json();
-        localStorage.setItem("rgit_token", data.token);
-        localStorage.setItem("rgit_email", "demo@rgit.invalid");
+        localStorage.setItem("open_gitea_token", data.token);
+        localStorage.setItem("open_gitea_email", "demo@open-gitea.invalid");
         location.reload();
       } catch (e) {
         var errEl = document.getElementById("auth-error");
@@ -202,7 +202,7 @@
   // みでpushは出来ないデモアカウント、ユーザー指示 2026-07-22)。
   // 手動でログイン/デモログイン/ログアウトを操作した瞬間に自動切り替えは
   // 停止する。
-  if (!localStorage.getItem("rgit_token")) {
+  if (!localStorage.getItem("open_gitea_token")) {
     var banner = document.createElement("div");
     banner.id = "demo-cycle-banner";
     banner.textContent = "👤 デモ表示: ログイン前の画面です(数秒後、自動でログイン後の画面に切り替わります)";
@@ -217,25 +217,25 @@
           var res = await fetch(API_BASE + "/api/auth/demo-login", { method: "POST" });
           if (!res.ok) { throw new Error("status " + res.status); }
           var data = await res.json();
-          sessionStorage.setItem("rgit_auto_demo", "1");
-          localStorage.setItem("rgit_token", data.token);
-          localStorage.setItem("rgit_email", "demo@rgit.invalid");
+          sessionStorage.setItem("open_gitea_auto_demo", "1");
+          localStorage.setItem("open_gitea_token", data.token);
+          localStorage.setItem("open_gitea_email", "demo@open-gitea.invalid");
         } catch (e) { return; }
       } else {
-        sessionStorage.removeItem("rgit_auto_demo");
-        localStorage.removeItem("rgit_token");
-        localStorage.removeItem("rgit_email");
+        sessionStorage.removeItem("open_gitea_auto_demo");
+        localStorage.removeItem("open_gitea_token");
+        localStorage.removeItem("open_gitea_email");
       }
       location.reload();
     }, CYCLE_INTERVAL_MS);
-  } else if (sessionStorage.getItem("rgit_auto_demo") === "1") {
+  } else if (sessionStorage.getItem("open_gitea_auto_demo") === "1") {
     // 自動デモがログイン後表示のフェーズで再読み込みされた状態。
     // 次のタイマーでログイン前表示へ戻すため、同じ間隔で再度切り替える。
     setTimeout(function () {
       if (userInteracted) { return; }
-      sessionStorage.removeItem("rgit_auto_demo");
-      localStorage.removeItem("rgit_token");
-      localStorage.removeItem("rgit_email");
+      sessionStorage.removeItem("open_gitea_auto_demo");
+      localStorage.removeItem("open_gitea_token");
+      localStorage.removeItem("open_gitea_email");
       location.reload();
     }, CYCLE_INTERVAL_MS);
     var banner2 = document.createElement("div");

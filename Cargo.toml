@@ -1,13 +1,13 @@
 [package]
-name = "rgit"
+name = "open-gitea"
 version = "0.1.0"
 edition = "2021"
 license = "Apache-2.0"
 description = "Gitea(Go製)のRust版を目指す、自己ホスト型Git forge(git smart HTTP clone/push・OTPログイン・アクセス制御・Wiki・Issueまで実装、PR/Webhookは未実装)"
-repository = "https://github.com/aon-co-jp/RS-Git"
+repository = "https://github.com/aon-co-jp/open-gitea"
 
 [[bin]]
-name = "rgit"
+name = "open-gitea"
 path = "src/main.rs"
 
 [dependencies]

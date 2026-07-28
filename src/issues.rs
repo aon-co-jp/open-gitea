@@ -2,7 +2,7 @@
 //! Webhookは今回のスコープ外(未着手のまま正直に記録)。
 //!
 //! 実体はWikiと同様、対象リポジトリのbareリポジトリディレクトリ直下に
-//! JSONファイル(`.rgit-issues.json`)を1本置くだけ(DB非依存という
+//! JSONファイル(`.open-gitea-issues.json`)を1本置くだけ(DB非依存という
 //! 既存方針を踏襲)。アクセス制御はWikiと同じく本体リポジトリの
 //! [`crate::access::AccessConfig`]をそのまま流用する(Issue専用の権限
 //! 系統は持たない)——閲覧は`Need::View`、作成・コメント・ステータス
@@ -45,7 +45,7 @@ struct IssueStore {
 }
 
 fn issues_path(repo_path: &Path) -> PathBuf {
-    repo_path.join(".rgit-issues.json")
+    repo_path.join(".open-gitea-issues.json")
 }
 
 async fn load(repo_path: &Path) -> IssueStore {
