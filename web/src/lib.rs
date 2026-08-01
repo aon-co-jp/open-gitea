@@ -78,7 +78,9 @@ fn parse_readme_fields(text: &str) -> Option<(String, String)> {
 
 async fn load_readme(repo: String) {
     show_status(&format!("{repo} のREADMEを読み込み中..."));
-    wasm_bindgen_futures::spawn_local(wiki::load_wiki_list(repo.clone()));
+    if !is_memory_saver_mode() {
+        wasm_bindgen_futures::spawn_local(wiki::load_wiki_list(repo.clone()));
+    }
     let url = format!("/api/repos/{repo}/readme");
     match fetch_text(&url).await {
         Ok(text) => match parse_readme_fields(&text) {
@@ -185,7 +187,136 @@ fn reload_after_login() {
 pub fn start() {
     auth::wire_auth_ui();
     admin::wire_admin_ui();
+    wire_feature_mode();
     wasm_bindgen_futures::spawn_local(load_repo_list());
     wasm_bindgen_futures::spawn_local(load_capacity());
     admin::refresh_all();
+}
+
+/// 電源/機能プロファイル(2026-08-01追加、エコシステム標準方針
+/// `open-raid-z/CLAUDE.md`「GUIを持つ全リポジトリに設置する」への対応)。
+///
+/// `open-easy-web`の`power_profile.rs`と同じ設計(省電力/省メモリ/常時
+/// 電源接続は**独立したチェックボックス**として組み合わせ可能、「通常」は
+/// 3つとも未チェックの状態として表現する)を、チェックボックスUIとして
+/// 移植する。「省機能表示」(非必須セクションのDOM非表示)だけは別軸の
+/// ボタン切替のまま(open-redmine先行実装と同じ、UIの見せ方が異なる
+/// ためチェックボックス化していない)。
+///
+/// **正直な開示**: このアプリにはバックグラウンドポーリングループが無い
+/// (git操作・README/Wiki表示はいずれも都度のリクエスト駆動)ため、
+/// `open-easy-web`のようなポーリング間隔の合成ロジックは意味を持たない。
+/// 実際に効果があるのは1軸のみ: **省電力または省メモリのいずれかが
+/// 有効ならリポジトリ選択時のWikiページ一覧自動取得(`wiki::
+/// load_wiki_list`)を止め、常時電源接続が有効ならその抑制を上書きして
+/// 常に自動取得する**(`open-easy-web`の「常時電源接続がバッテリー節約
+/// 軸を上書きする」という合成ルールと同じ考え方)。省電力・常時電源接続の
+/// チェックボックス自体は、将来ポーリング処理を追加する際にすぐ使える
+/// ようこのエコシステム共通のUI規約として先行して用意してある。
+const PROFILE_POWER_SAVE_KEY: &str = "open_gitea_profile_power_save";
+const PROFILE_MEMORY_SAVER_KEY: &str = "open_gitea_profile_memory_saver";
+const PROFILE_ALWAYS_ON_KEY: &str = "open_gitea_profile_always_on";
+const MINIMAL_UI_KEY: &str = "open_gitea_minimal_ui_v1";
+const MINIMAL_HIDDEN_SECTION_IDS: [&str; 2] = ["wiki-panel", "intro"];
+
+fn local_storage() -> Option<web_sys::Storage> {
+    web_sys::window()?.local_storage().ok().flatten()
+}
+
+fn flag_get(key: &str) -> bool {
+    local_storage().and_then(|s| s.get_item(key).ok().flatten()).as_deref() == Some("1")
+}
+
+fn flag_set(key: &str, value: bool) {
+    if let Some(s) = local_storage() {
+        let _ = s.set_item(key, if value { "1" } else { "0" });
+    }
+}
+
+fn checkbox_checked(id: &str) -> bool {
+    document().get_element_by_id(id).and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok()).map(|el| el.checked()).unwrap_or(false)
+}
+
+fn set_checkbox_checked(id: &str, checked: bool) {
+    if let Some(el) = document().get_element_by_id(id).and_then(|el| el.dyn_into::<web_sys::HtmlInputElement>().ok()) {
+        el.set_checked(checked);
+    }
+}
+
+/// 省電力または省メモリのいずれかが有効で、かつ常時電源接続で上書き
+/// されていない状態かどうか(=Wiki自動取得を止めるべきかどうか)。
+pub(crate) fn is_memory_saver_mode() -> bool {
+    let always_on = flag_get(PROFILE_ALWAYS_ON_KEY);
+    let power_save = flag_get(PROFILE_POWER_SAVE_KEY);
+    let memory_saver = flag_get(PROFILE_MEMORY_SAVER_KEY);
+    !always_on && (power_save || memory_saver)
+}
+
+fn show_section(id: &str, visible: bool) {
+    let Some(el) = document().get_element_by_id(id) else { return };
+    if visible {
+        el.class_list().remove_1("hidden").ok();
+    } else {
+        el.class_list().add_1("hidden").ok();
+    }
+}
+
+fn feature_profile_labels() -> Vec<&'static str> {
+    let mut labels = Vec::new();
+    if flag_get(PROFILE_POWER_SAVE_KEY) {
+        labels.push("省電力");
+    }
+    if flag_get(PROFILE_MEMORY_SAVER_KEY) {
+        labels.push("省メモリ");
+    }
+    if flag_get(PROFILE_ALWAYS_ON_KEY) {
+        labels.push("常時電源接続");
+    }
+    labels
+}
+
+fn apply_feature_mode() {
+    let minimal = flag_get(MINIMAL_UI_KEY);
+    for id in MINIMAL_HIDDEN_SECTION_IDS {
+        show_section(id, !minimal);
+    }
+    set_checkbox_checked("profile-power-save", flag_get(PROFILE_POWER_SAVE_KEY));
+    set_checkbox_checked("profile-memory-saver", flag_get(PROFILE_MEMORY_SAVER_KEY));
+    set_checkbox_checked("profile-always-on", flag_get(PROFILE_ALWAYS_ON_KEY));
+
+    let mut labels = feature_profile_labels();
+    if minimal {
+        labels.push("省機能表示");
+    }
+    let text = if labels.is_empty() { "通常モード (normal mode)".to_string() } else { format!("有効: {} (active)", labels.join(" + ")) };
+    if let Some(el) = document().get_element_by_id("power-profile-status") {
+        el.set_text_content(Some(&text));
+    }
+}
+
+fn wire_feature_mode() {
+    auth::wire_click("profile-power-save", || {
+        flag_set(PROFILE_POWER_SAVE_KEY, checkbox_checked("profile-power-save"));
+        apply_feature_mode();
+    });
+    auth::wire_click("profile-memory-saver", || {
+        flag_set(PROFILE_MEMORY_SAVER_KEY, checkbox_checked("profile-memory-saver"));
+        apply_feature_mode();
+    });
+    auth::wire_click("profile-always-on", || {
+        flag_set(PROFILE_ALWAYS_ON_KEY, checkbox_checked("profile-always-on"));
+        apply_feature_mode();
+    });
+    auth::wire_click("power-profile-minimal-btn", || {
+        flag_set(MINIMAL_UI_KEY, !flag_get(MINIMAL_UI_KEY));
+        apply_feature_mode();
+    });
+    auth::wire_click("power-profile-restore-btn", || {
+        flag_set(PROFILE_POWER_SAVE_KEY, false);
+        flag_set(PROFILE_MEMORY_SAVER_KEY, false);
+        flag_set(PROFILE_ALWAYS_ON_KEY, false);
+        flag_set(MINIMAL_UI_KEY, false);
+        apply_feature_mode();
+    });
+    apply_feature_mode();
 }

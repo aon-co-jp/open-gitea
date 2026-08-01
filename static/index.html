@@ -36,6 +36,9 @@
   .auth-sep { color: #ccc; }
   #btn-demo-login { background: #2f6fed; color: #fff; border: none; border-radius: 4px; padding: .3rem .7rem; }
   #demo-cycle-banner { background: #eef2ff; border: 1px solid #b6c3f0; border-radius: 6px; padding: .5rem .75rem; margin-bottom: .75rem; font-size: .9em; }
+  #power-profile-bar { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 1rem; padding: 0.5rem 0.75rem; background: #f6f8fa; border: 1px solid #ddd; border-radius: 6px; font-size: 0.9em; }
+  #power-profile-bar button { cursor: pointer; }
+  #power-profile-status { color: #666; }
 </style>
 </head>
 <body>
@@ -74,6 +77,15 @@
   </div>
   <span id="auth-error"></span>
   <span id="capacity-status"></span>
+</div>
+<div id="power-profile-bar">
+  <span class="auth-label">⚙️ モード:</span>
+  <label><input type="checkbox" id="profile-power-save"> 省電力</label>
+  <label><input type="checkbox" id="profile-memory-saver"> 省メモリ</label>
+  <label><input type="checkbox" id="profile-always-on"> 常時電源接続</label>
+  <button id="power-profile-minimal-btn" type="button">省機能表示に切替</button>
+  <button id="power-profile-restore-btn" type="button">全機能を復元</button>
+  <span id="power-profile-status" class="note"></span>
 </div>
 <div id="status">起動中...</div>
 <div id="layout">

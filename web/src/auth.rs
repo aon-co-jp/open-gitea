@@ -200,7 +200,7 @@ pub(crate) fn json_escape(s: &str) -> String {
     out
 }
 
-fn wire_click(id: &str, f: impl Fn() + 'static) {
+pub(crate) fn wire_click(id: &str, f: impl Fn() + 'static) {
     let doc = document();
     let Some(el) = doc.get_element_by_id(id) else { return };
     let closure = Closure::<dyn FnMut()>::new(f);
