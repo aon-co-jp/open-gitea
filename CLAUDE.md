@@ -93,11 +93,25 @@ CGIプログラム)をサブプロセスとして起動し、HTTPリクエスト
      になることを確認、(d) 「全機能を復元」→全チェックボックスが
      未チェックに戻り、ステータスが「通常モード」、Wikiパネルが
      `block`に戻ることを確認。
-  - 次にすべきこと: (1) VPS本番への実際のデプロイ+`git ls-files`との
-    突き合わせによる「コミット済みバンドルがVPS上の実配信物と一致する
-    こと」の確認(上記2.の再発防止)、(2) 省電力チェックボックスに
-    独立した実効果を持たせるかどうかの検討(現状は省メモリと同じ抑制
-    軸を共有)。
+  - 次にすべきこと: 省電力チェックボックスに独立した実効果を持たせる
+    かどうかの検討(現状は省メモリと同じ抑制軸を共有)。
+
+- **2026-08-01(続き) 本番デプロイ完了・実害の確認**: VPS
+  (`/root/open-gitea`)は`git pull`で`cb8fdc9`(2026-07-27時点)から
+  大幅に遅れていたことが判明——上記の`static/rgit_web.*`問題に加え、
+  `src/issues.rs`(labels/assignee/milestone)・`src/releases.rs`
+  (gitタグ一覧)・`main.rs`の関連ルーティングも未反映のままだった。
+  `git pull`→`cargo build --release`→`systemctl restart open-gitea`で
+  反映。**実害を確認**: 修正前は`curl https://easy-web.tokyo/
+  open-gitea/ui/open_gitea_web.js`が実際に`404`(本番ユーザーが
+  2026-07-28以降ずっと壊れたUIを見ていたことを実証)、修正後は`200`。
+  `curl https://easy-web.tokyo/open-gitea/ui/`のHTML本文に
+  `profile-power-save`/`profile-memory-saver`/`profile-always-on`が
+  実際に含まれることを確認。**正直な開示**: `runo.tokyo/open-gitea/ui/`は
+  今回`404`のまま(このドメイン側のテナント登録自体が現状無い可能性、
+  本番の主系統は`easy-web.tokyo`に統一されている——他リポジトリの
+  HANDOFFでも同様の傾向、次回確認事項として記録するに留め、今回は
+  深追いしていない)。
 
 - **2026-07-22(続き) RPoemのpoem互換ファサード(`open-runo-poem-compat`)を
   試用(トライアル、本番コードは未変更)**: ユーザー指示「RS-Git等の
