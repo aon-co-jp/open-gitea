@@ -82,6 +82,54 @@ struct AppState {
     /// 環境変数(既定`true`)で制御、`false`にすれば従来通り誰でも
     /// 自己申請→承認できる状態に戻せる。
     accounts_locked: bool,
+    /// インストーラー(`install.sh`/`install.ps1`)で選択された電源プロファイル
+    /// の既定値(`RGIT_POWER_PROFILE`環境変数、`power_save`/`memory_saver`/
+    /// `always_on`をカンマ区切りで指定、2026-08-07追加)。ブラウザ側で
+    /// まだ一度もローカル設定(`localStorage`)を選んだことが無い初回訪問時
+    /// のみ、`GET /api/power-profile`経由でこの既定値が適用される
+    /// (`web/src/lib.rs::apply_server_default_profile`参照)。
+    power_profile_default: PowerProfileDefault,
+}
+
+/// エコシステム標準方針(`open-raid-z/CLAUDE.md`)の3電源プロファイル
+/// (省電力/省メモリ/常時電源接続)を、インストーラーが選んだ既定値として
+/// サーバー起動時に1回だけ読み込む。
+#[derive(Clone, Copy, Default)]
+struct PowerProfileDefault {
+    power_save: bool,
+    memory_saver: bool,
+    always_on: bool,
+}
+
+impl PowerProfileDefault {
+    /// `RGIT_POWER_PROFILE=power_save,memory_saver`のようなカンマ区切りを
+    /// パースする。未設定・空・不明なトークンはすべて無視し(既定は
+    /// 「通常」=全部false)、インストーラーを経由しない開発環境でも
+    /// 従来通り無害に動作する。
+    fn from_env() -> Self {
+        Self::from_env_str(&std::env::var("RGIT_POWER_PROFILE").unwrap_or_default())
+    }
+
+    fn from_env_str(raw: &str) -> Self {
+        let mut out = Self::default();
+        for token in raw.split(',').map(str::trim) {
+            match token {
+                "power_save" => out.power_save = true,
+                "memory_saver" => out.memory_saver = true,
+                "always_on" => out.always_on = true,
+                _ => {}
+            }
+        }
+        out
+    }
+
+    fn to_json(self) -> Vec<u8> {
+        format!(
+            "{{\"power_save\":{},\"memory_saver\":{},\"always_on\":{}}}",
+            self.power_save, self.memory_saver, self.always_on
+        )
+        .into_bytes()
+    }
 }
 
 /// `Authorization`ヘッダからログイン中のメールアドレスを特定する。
@@ -1334,6 +1382,18 @@ async fn healthz() -> &'static str {
     "ok"
 }
 
+/// `GET /api/power-profile` — インストーラーが選択した電源プロファイルの
+/// 既定値(認証不要、秘匿情報ではない)。ブラウザ側はこれを「初回訪問時
+/// だけ」の初期値として使い、以後はユーザー自身のチェックボックス操作
+/// (`localStorage`)を常に優先する(`web/src/lib.rs`参照、2026-08-07追加)。
+#[handler]
+async fn get_power_profile(state: Data<&AppState>) -> PoemResult<Response> {
+    Ok(Response::builder()
+        .status(poem::http::StatusCode::OK)
+        .content_type("application/json")
+        .body(state.power_profile_default.to_json()))
+}
+
 /// git smart HTTPプロトコルの全経路(`info/refs`・`git-upload-pack`・
 /// `git-receive-pack`)を`git http-backend`へCGI形式で橋渡しする。
 #[allow(clippy::too_many_arguments)]
@@ -1504,6 +1564,7 @@ fn build_routes(state: AppState, static_dir: &str) -> impl poem::Endpoint {
         .at("/api/accounts/requests/:id/decide", post(decide_access_request))
         .at("/api/accounts/:email/create-permission", put(set_create_permission))
         .at("/api/capacity", get(get_capacity))
+        .at("/api/power-profile", get(get_power_profile))
         .nest(
             "/ui",
             poem::endpoint::StaticFilesEndpoint::new(static_dir).index_file("index.html"),
@@ -1530,7 +1591,12 @@ async fn main() -> anyhow::Result<()> {
     if accounts_locked {
         tracing::info!("account registration is locked to the admin email only (RGIT_ACCOUNTS_LOCKED=false to lift)");
     }
-    let state = AppState { repos_root, auth: Arc::new(auth::AuthStore::default()), admin_email, smtp, accounts_locked };
+    let power_profile_default = PowerProfileDefault::from_env();
+    tracing::info!(
+        "power profile default (from RGIT_POWER_PROFILE): power_save={} memory_saver={} always_on={}",
+        power_profile_default.power_save, power_profile_default.memory_saver, power_profile_default.always_on
+    );
+    let state = AppState { repos_root, auth: Arc::new(auth::AuthStore::default()), admin_email, smtp, accounts_locked, power_profile_default };
 
     // git smart HTTPの実際のURLパターン(`git clone http://host/repo.git`)は
     // `/{repo}.git/info/refs`・`/{repo}.git/git-upload-pack`・
@@ -1561,7 +1627,7 @@ mod handler_tests {
         let unique = format!("{:?}-{label}", std::time::Instant::now());
         let repos_root = std::env::temp_dir().join(format!("open-gitea-handler-test-{}", unique.replace(['{', '}', ':', ' ', '.'], "-")));
         tokio::fs::create_dir_all(&repos_root).await.unwrap();
-        AppState { repos_root, auth: Arc::new(auth::AuthStore::default()), admin_email: ADMIN_EMAIL.to_string(), smtp: None, accounts_locked: false }
+        AppState { repos_root, auth: Arc::new(auth::AuthStore::default()), admin_email: ADMIN_EMAIL.to_string(), smtp: None, accounts_locked: false, power_profile_default: PowerProfileDefault::default() }
     }
 
     #[tokio::test]
@@ -1807,5 +1873,36 @@ mod handler_tests {
             .send()
             .await;
         git_push_resp.assert_status(poem::http::StatusCode::UNAUTHORIZED);
+    }
+
+    #[test]
+    fn power_profile_default_parses_comma_separated_env_value() {
+        assert!(!PowerProfileDefault::from_env_str("").power_save);
+        let p = PowerProfileDefault::from_env_str("power_save,always_on");
+        assert!(p.power_save);
+        assert!(!p.memory_saver);
+        assert!(p.always_on);
+        // 未知のトークン・余分な空白は無視される(壊れた設定でも安全側に倒れる)。
+        let p2 = PowerProfileDefault::from_env_str(" memory_saver , bogus ,always_on");
+        assert!(p2.memory_saver);
+        assert!(p2.always_on);
+        assert!(!p2.power_save);
+    }
+
+    /// `GET /api/power-profile`が認証不要でインストーラー既定値を返すこと
+    /// (`RGIT_POWER_PROFILE`環境変数、2026-08-07追加)。
+    #[tokio::test]
+    async fn power_profile_endpoint_reflects_configured_default() {
+        let mut state = make_state("power-profile").await;
+        state.power_profile_default = PowerProfileDefault::from_env_str("memory_saver");
+        let app = build_routes(state, "./static");
+        let client = TestClient::new(app);
+
+        let resp = client.get("/api/power-profile").send().await;
+        resp.assert_status_is_ok();
+        let body: serde_json::Value = serde_json::from_slice(&resp.0.into_body().into_bytes().await.unwrap()).unwrap();
+        assert_eq!(body["power_save"], false);
+        assert_eq!(body["memory_saver"], true);
+        assert_eq!(body["always_on"], false);
     }
 }

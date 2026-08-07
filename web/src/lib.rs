@@ -188,6 +188,7 @@ pub fn start() {
     auth::wire_auth_ui();
     admin::wire_admin_ui();
     wire_feature_mode();
+    wasm_bindgen_futures::spawn_local(apply_server_default_profile_once());
     wasm_bindgen_futures::spawn_local(load_repo_list());
     wasm_bindgen_futures::spawn_local(load_capacity());
     admin::refresh_all();
@@ -217,6 +218,12 @@ const PROFILE_POWER_SAVE_KEY: &str = "open_gitea_profile_power_save";
 const PROFILE_MEMORY_SAVER_KEY: &str = "open_gitea_profile_memory_saver";
 const PROFILE_ALWAYS_ON_KEY: &str = "open_gitea_profile_always_on";
 const MINIMAL_UI_KEY: &str = "open_gitea_minimal_ui_v1";
+/// このブラウザで一度でも`GET /api/power-profile`のサーバー既定値を
+/// 適用したかどうかのマーカー(2026-08-07追加、インストーラーの電源
+/// プロファイル選択機能対応)。適用済みなら二度と上書きしない
+/// ——ユーザーが手動でチェックボックスを外した選択を、リロードのたびに
+/// インストーラー既定値へ引き戻してしまわないようにするため。
+const SERVER_DEFAULT_APPLIED_KEY: &str = "open_gitea_server_default_applied_v1";
 const MINIMAL_HIDDEN_SECTION_IDS: [&str; 2] = ["wiki-panel", "intro"];
 
 fn local_storage() -> Option<web_sys::Storage> {
@@ -292,6 +299,32 @@ fn apply_feature_mode() {
     if let Some(el) = document().get_element_by_id("power-profile-status") {
         el.set_text_content(Some(&text));
     }
+}
+
+/// `install.sh`/`install.ps1`が書き出した`RGIT_POWER_PROFILE`環境変数を
+/// `GET /api/power-profile`経由で読み、**このブラウザで初めて開いた
+/// ときだけ**チェックボックスの初期状態として反映する(2026-08-07追加、
+/// `open-raid-z/CLAUDE.md`のインストーラー電源プロファイル選択方針への
+/// 対応)。2回目以降のロードでは`SERVER_DEFAULT_APPLIED_KEY`が既に
+/// `"1"`になっているため、ユーザー自身のチェックボックス操作を
+/// インストーラー既定値で上書きすることはない。
+async fn apply_server_default_profile_once() {
+    if flag_get(SERVER_DEFAULT_APPLIED_KEY) {
+        return;
+    }
+    flag_set(SERVER_DEFAULT_APPLIED_KEY, true);
+    let Ok(text) = fetch_text("/api/power-profile").await else { return };
+    let Ok(value) = parse_light(&text) else { return };
+    if value.get("power_save").and_then(LightValue::as_bool).unwrap_or(false) {
+        flag_set(PROFILE_POWER_SAVE_KEY, true);
+    }
+    if value.get("memory_saver").and_then(LightValue::as_bool).unwrap_or(false) {
+        flag_set(PROFILE_MEMORY_SAVER_KEY, true);
+    }
+    if value.get("always_on").and_then(LightValue::as_bool).unwrap_or(false) {
+        flag_set(PROFILE_ALWAYS_ON_KEY, true);
+    }
+    apply_feature_mode();
 }
 
 fn wire_feature_mode() {
