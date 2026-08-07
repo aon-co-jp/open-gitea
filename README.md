@@ -21,6 +21,7 @@ Giteaが持つ機能のうち、まずgit clone/push・OTPログイン・アク�
 - **自己申請フロー**: 誰でもアクセス許可を申請でき、管理者がメールで気づいて承認/却下(閲覧/DL/push個別許可)
 - **Wiki**: 各リポジトリ`<name>.git`の兄弟として`<name>.wiki.git`という素のbareリポジトリを自動作成(GitHub/GitLab/Gitea同様の設計)。閲覧はWeb UI(`GET /api/repos/:name/wiki`・`/wiki/:page`)、編集は`git clone`/`git push`で行う(Web版ページエディタは無い、正直な開示)。アクセス権限は本体リポジトリと共有(別権限系統は持たない)。
 - **WASM製Web UI**(`/ui/`): リポジトリ一覧・README閲覧・Wiki閲覧・ログイン・管理パネル(申請一覧・アカウント管理・グループ管理・リポジトリ別アクセス設定)
+- **電源プロファイル(省電力/省メモリ/常時電源接続)**: Web UI上のチェックボックスで切替可能。`install.sh`/`install.ps1`実行時にも選択でき、`RGIT_POWER_PROFILE`環境変数(例: `power_save,memory_saver`)としてサービスに設定される。ブラウザは`GET /api/power-profile`で初回訪問時だけこの既定値を読み込み、以後はユーザー自身の選択(`localStorage`)を優先する。
 
 ## 起動方法
 
