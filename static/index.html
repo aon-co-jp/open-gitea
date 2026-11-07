@@ -173,7 +173,7 @@
 // (WASM側が起動時にこれを読み取り、以後は通常ログインと同じ扱いで
 // 動作する)。
 (function () {
-  var API_BASE = "/rgit";
+  var API_BASE = "/open-gitea";
   var CYCLE_INTERVAL_MS = 10000; // 「適当な時間」= 10秒間隔で切り替え
 
   function markUserInteracted() {
@@ -188,7 +188,7 @@
     demoBtn.addEventListener("click", async function () {
       markUserInteracted();
       try {
-        var res = await fetch(API_BASE + "/api/auth/demo-login", { method: "POST" });
+        var res = await fetch(API_BASE + "/open_gitea.v1.Gitea/DemoLogin", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
         if (!res.ok) { throw new Error("status " + res.status); }
         var data = await res.json();
         localStorage.setItem("open_gitea_token", data.token);
@@ -226,7 +226,7 @@
       demoOn = !demoOn;
       if (demoOn) {
         try {
-          var res = await fetch(API_BASE + "/api/auth/demo-login", { method: "POST" });
+          var res = await fetch(API_BASE + "/open_gitea.v1.Gitea/DemoLogin", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
           if (!res.ok) { throw new Error("status " + res.status); }
           var data = await res.json();
           sessionStorage.setItem("open_gitea_auto_demo", "1");

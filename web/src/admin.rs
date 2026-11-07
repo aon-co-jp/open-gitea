@@ -17,7 +17,7 @@
 //! 管理者以外お断りの`403`も同様にそのままメッセージ表示する。
 
 use crate::parse_string_array;
-use crate::auth::{authorized_fetch, json_escape};
+use crate::auth::{connect, json_escape};
 use rust_json::{parse_light, LightValue};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
@@ -128,7 +128,7 @@ fn query_bool(scope: &Element, selector: &str) -> bool {
 // --- アクセス申請一覧 ---
 
 async fn refresh_requests() {
-    match authorized_fetch("/api/accounts/requests", "GET", None).await {
+    match connect("ListAccessRequests", None).await {
         Ok((200, text)) => {
             let Ok(value) = parse_light(&text) else {
                 set_html("requests-list", "<li>応答の解析に失敗しました</li>");
@@ -182,8 +182,8 @@ async fn decide_request(id: String, approve: bool, allow_view: bool, allow_downl
     let body = format!(
         r#"{{"approve":{approve},"allow_view":{allow_view},"allow_download":{allow_download},"allow_push":{allow_push}}}"#
     );
-    let url = format!("/api/accounts/requests/{}/decide", json_escape(&id));
-    match authorized_fetch(&url, "POST", Some(&body)).await {
+    let body = format!(r#"{{"id":"{}",{}"#, json_escape(&id), &body[1..]);
+    match connect("DecideAccessRequest", Some(&body)).await {
         Ok((200, _)) => {
             refresh_requests().await;
             refresh_accounts().await;
@@ -219,7 +219,7 @@ fn wire_requests_list() {
 // --- 登録アカウント ---
 
 async fn refresh_accounts() {
-    match authorized_fetch("/api/accounts", "GET", None).await {
+    match connect("ListAccounts", None).await {
         Ok((200, text)) => {
             let emails = parse_string_array(&text);
             if emails.is_empty() {
@@ -232,7 +232,7 @@ async fn refresh_accounts() {
             // へ切り替える(前回HANDOFFに記載した宿題への対応)。
             let mut html = String::new();
             for email in &emails {
-                let can_create = match authorized_fetch(&format!("/api/accounts/{}", json_escape(email)), "GET", None).await {
+                let can_create = match connect("GetAccount", Some(&format!(r#"{{"email":"{}"}}"#, json_escape(email)))).await {
                     Ok((200, detail_text)) => parse_light(&detail_text)
                         .ok()
                         .and_then(|v| v.get("can_create_repos").and_then(LightValue::as_bool))
@@ -262,8 +262,8 @@ async fn add_account() {
         return;
     }
     let body = format!(r#"{{"email":"{}"}}"#, json_escape(&email));
-    match authorized_fetch("/api/accounts", "POST", Some(&body)).await {
-        Ok((201, _)) => {
+    match connect("AddAccount", Some(&body)).await {
+        Ok((200, _)) => {
             clear_input("new-account-email");
             refresh_accounts().await;
         }
@@ -275,8 +275,8 @@ async fn add_account() {
 
 async fn remove_account(email: String) {
     show_admin_error("");
-    let url = format!("/api/accounts/{}", json_escape(&email));
-    match authorized_fetch(&url, "DELETE", None).await {
+    let body = format!(r#"{{"email":"{}"}}"#, json_escape(&email));
+    match connect("RemoveAccount", Some(&body)).await {
         Ok((200, _)) => refresh_accounts().await,
         Ok((status, text)) => show_admin_error(&format!("削除に失敗しました(status {status}): {text}")),
         Err(_) => show_admin_error("削除に失敗しました(通信エラー)"),
@@ -285,9 +285,8 @@ async fn remove_account(email: String) {
 
 async fn set_create_permission(email: String, allow: bool) {
     show_admin_error("");
-    let body = format!(r#"{{"allow":{allow}}}"#);
-    let url = format!("/api/accounts/{}/create-permission", json_escape(&email));
-    match authorized_fetch(&url, "PUT", Some(&body)).await {
+    let body = format!(r#"{{"email":"{}","allow":{allow}}}"#, json_escape(&email));
+    match connect("SetCreatePermission", Some(&body)).await {
         Ok((200, _)) => {}
         Ok((status, text)) => show_admin_error(&format!("作成許可の変更に失敗しました(status {status}): {text}")),
         Err(_) => show_admin_error("作成許可の変更に失敗しました(通信エラー)"),
@@ -328,7 +327,7 @@ fn wire_accounts_list() {
 // --- グループ ---
 
 async fn refresh_groups() {
-    match authorized_fetch("/api/groups", "GET", None).await {
+    match connect("ListGroups", None).await {
         Ok((200, text)) => {
             let names = parse_string_array(&text);
             if names.is_empty() {
@@ -357,8 +356,8 @@ async fn create_group() {
         return;
     }
     let body = format!(r#"{{"name":"{}"}}"#, json_escape(&name));
-    match authorized_fetch("/api/groups", "POST", Some(&body)).await {
-        Ok((201, text)) => {
+    match connect("CreateGroup", Some(&body)).await {
+        Ok((200, text)) => {
             clear_input("new-group-name");
             let token = parse_light(&text).ok().and_then(|v| v.get("token").and_then(LightValue::as_str).map(str::to_string));
             if let Some(token) = token {
@@ -377,8 +376,8 @@ async fn create_group() {
 
 async fn remove_group(name: String) {
     show_admin_error("");
-    let url = format!("/api/groups/{}", json_escape(&name));
-    match authorized_fetch(&url, "DELETE", None).await {
+    let body = format!(r#"{{"name":"{}"}}"#, json_escape(&name));
+    match connect("DeleteGroup", Some(&body)).await {
         Ok((200, _)) => refresh_groups().await,
         Ok((status, text)) => show_admin_error(&format!("削除に失敗しました(status {status}): {text}")),
         Err(_) => show_admin_error("削除に失敗しました(通信エラー)"),
@@ -404,7 +403,7 @@ fn wire_groups_list() {
 // --- リポジトリ別アクセス設定 ---
 
 async fn refresh_repo_select() {
-    match authorized_fetch("/api/repos", "GET", None).await {
+    match connect("ListRepos", None).await {
         Ok((200, text)) => {
             let names = parse_string_array(&text);
             let mut html = String::new();
@@ -444,8 +443,8 @@ async fn load_access() {
         show_admin_error("リポジトリを選択してください");
         return;
     }
-    let url = format!("/api/repos/{}/access", json_escape(&repo));
-    match authorized_fetch(&url, "GET", None).await {
+    let body = format!(r#"{{"name":"{}"}}"#, json_escape(&repo));
+    match connect("GetAccess", Some(&body)).await {
         Ok((200, text)) => {
             let Ok(value) = parse_light(&text) else {
                 show_admin_error("応答の解析に失敗しました");
@@ -537,8 +536,8 @@ async fn save_access() {
         r#"{{"mode":"{mode}","group":{group_json},"allow_view":{allow_view},"allow_download":{allow_download},"allow_push":{allow_push},"accounts":{{{accounts_json}}}}}"#,
         mode = json_escape(&mode),
     );
-    let url = format!("/api/repos/{}/access", json_escape(&repo));
-    match authorized_fetch(&url, "PUT", Some(&body)).await {
+    let body = format!(r#"{{"name":"{}",{}"#, json_escape(&repo), &body[1..]);
+    match connect("SetAccess", Some(&body)).await {
         Ok((200, _)) => set_text("access-status", &format!("{repo} の設定を保存しました")),
         Ok((400, text)) => show_admin_error(&format!("入力内容が不正です: {text}")),
         Ok((401, _)) | Ok((403, _)) => show_admin_error("管理者ログインが必要です"),

@@ -49,6 +49,7 @@ mod access;
 mod accounts;
 mod auth;
 mod capacity;
+mod connect;
 mod issues;
 mod mail;
 mod releases;
@@ -1534,9 +1535,8 @@ async fn git_post(req: &Request, body: Body, state: Data<&AppState>) -> PoemResu
 /// ルーティング定義を`main()`とテスト(`poem::test::TestClient`)の両方から
 /// 再利用できるように切り出したもの(2026-07-21追記)。
 fn build_routes(state: AppState, static_dir: &str) -> impl poem::Endpoint {
-    Route::new()
-        .at("/healthz", get(healthz))
-        .at("/repos", get(list_repos))
+    // 旧 REST の経路は公開せず、Connect の入口(`connect::endpoint`)からだけ内部で呼ぶ。
+    let inner = Route::new()
         .at("/repos/:name", put(create_repo))
         .at("/api/repos", get(list_repos))
         .at("/api/repos/:name/readme", get(get_readme))
@@ -1549,8 +1549,6 @@ fn build_routes(state: AppState, static_dir: &str) -> impl poem::Endpoint {
         .at("/api/repos/:name/issues/:id/comments", post(create_issue_comment))
         .at("/api/repos/:name/access", get(get_access).put(set_access))
         .at("/api/repos/:name/tree", get(get_tree))
-        .at("/api/repos/:name/zip", get(get_zip))
-        .at("/api/repos/:name/raw/*filepath", get(get_raw_file))
         .at("/api/auth/request-otp", post(request_otp))
         .at("/api/auth/verify-otp", post(verify_otp))
         .at("/api/auth/demo-login", post(demo_login))
@@ -1565,6 +1563,13 @@ fn build_routes(state: AppState, static_dir: &str) -> impl poem::Endpoint {
         .at("/api/accounts/:email/create-permission", put(set_create_permission))
         .at("/api/capacity", get(get_capacity))
         .at("/api/power-profile", get(get_power_profile))
+        .data(state.clone());
+    Route::new()
+        .at("/healthz", get(healthz))
+        .at("/open_gitea.v1.Gitea/:method", connect::endpoint(inner))
+        // 例外: ブラウザが直接開くダウンロード用 GET(リンク共有・`?token=` 認証)
+        .at("/api/repos/:name/zip", get(get_zip))
+        .at("/api/repos/:name/raw/*filepath", get(get_raw_file))
         .nest(
             "/ui",
             poem::endpoint::StaticFilesEndpoint::new(static_dir).index_file("index.html"),
@@ -1640,7 +1645,9 @@ mod handler_tests {
 
         // 未登録のメールアドレスは404ではなく registered:false を返す。
         let resp = client
-            .get("/api/accounts/nobody@example.com")
+            .post("/open_gitea.v1.Gitea/GetAccount")
+            .content_type("application/json")
+            .body(r#"{"email":"nobody@example.com"}"#)
             .header("Authorization", format!("Bearer {token}"))
             .send()
             .await;
@@ -1656,7 +1663,9 @@ mod handler_tests {
         accounts::save(&repos_root, &store).await.unwrap();
 
         let resp2 = client
-            .get("/api/accounts/member@example.com")
+            .post("/open_gitea.v1.Gitea/GetAccount")
+            .content_type("application/json")
+            .body(r#"{"email":"member@example.com"}"#)
             .header("Authorization", format!("Bearer {token}"))
             .send()
             .await;
@@ -1672,7 +1681,12 @@ mod handler_tests {
         let app = build_routes(state, "./static");
         let client = TestClient::new(app);
 
-        let resp = client.get("/api/accounts/member@example.com").send().await;
+        let resp = client
+            .post("/open_gitea.v1.Gitea/GetAccount")
+            .content_type("application/json")
+            .body(r#"{"email":"member@example.com"}"#)
+            .send()
+            .await;
         resp.assert_status(poem::http::StatusCode::UNAUTHORIZED);
     }
 
@@ -1689,11 +1703,13 @@ mod handler_tests {
         let client = TestClient::new(app);
 
         let resp = client
-            .put("/repos/demo")
+            .post("/open_gitea.v1.Gitea/CreateRepo")
+            .content_type("application/json")
+            .body(r#"{"name":"demo"}"#)
             .header("Authorization", format!("Bearer {token}"))
             .send()
             .await;
-        resp.assert_status(poem::http::StatusCode::CREATED);
+        resp.assert_status_is_ok();
 
         assert!(repos_root.join("demo.git").is_dir(), "main bare repo should exist");
         assert!(repos_root.join("demo.wiki.git").is_dir(), "wiki bare repo should exist alongside it");
@@ -1701,7 +1717,9 @@ mod handler_tests {
         // 空リポジトリ(コミット無し)なので、一覧APIはエラーではなく
         // 空配列を返す(要件通り)。
         let wiki_resp = client
-            .get("/api/repos/demo/wiki")
+            .post("/open_gitea.v1.Gitea/ListWiki")
+            .content_type("application/json")
+            .body(r#"{"name":"demo"}"#)
             .header("Authorization", format!("Bearer {token}"))
             .send()
             .await;
@@ -1754,11 +1772,13 @@ mod handler_tests {
             let app = build_routes(state.clone(), "./static");
             let client = TestClient::new(app);
             let resp = client
-                .put("/repos/proj")
+                .post("/open_gitea.v1.Gitea/CreateRepo")
+                .content_type("application/json")
+                .body(r#"{"name":"proj"}"#)
                 .header("Authorization", format!("Bearer {token}"))
                 .send()
                 .await;
-            resp.assert_status(poem::http::StatusCode::CREATED);
+            resp.assert_status_is_ok();
         }
         assert!(repos_root.join("proj.wiki.git").is_dir());
 
@@ -1804,10 +1824,10 @@ mod handler_tests {
         let recloned_content = tokio::fs::read_to_string(reclone_dir.join("Home.md")).await.unwrap();
         assert!(recloned_content.contains("RGit Wiki roundtrip test."));
 
-        // 4) HTTP APIからも同じ内容が見えることを確認(GET /api/repos/:name/wiki, /wiki/:page)。
-        let list_resp = reqwest_like_get(port, "/api/repos/proj/wiki", Some(&token)).await;
+        // 4) HTTP APIからも同じ内容が見えることを確認(Connect の ListWiki / GetWikiPage)。
+        let list_resp = reqwest_like_post(port, "ListWiki", r#"{"name":"proj"}"#, Some(&token)).await;
         assert!(list_resp.contains("Home.md"), "wiki page list should contain Home.md, got: {list_resp}");
-        let page_resp = reqwest_like_get(port, "/api/repos/proj/wiki/Home.md", Some(&token)).await;
+        let page_resp = reqwest_like_post(port, "GetWikiPage", r#"{"name":"proj","page":"Home.md"}"#, Some(&token)).await;
         assert!(page_resp.contains("RGit Wiki roundtrip test."), "wiki page content mismatch: {page_resp}");
 
         handle.abort();
@@ -1819,12 +1839,15 @@ mod handler_tests {
     /// クライアント(生TCP + 手組みHTTP/1.1リクエスト)。本体側は
     /// `poem`/`tokio`のみなので、テストコードもここでは標準ライブラリの
     /// 範囲(`tokio::net::TcpStream`)で完結させる。
-    async fn reqwest_like_get(port: u16, path: &str, bearer: Option<&str>) -> String {
+    async fn reqwest_like_post(port: u16, method: &str, json: &str, bearer: Option<&str>) -> String {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         use tokio::net::TcpStream;
         let mut stream = TcpStream::connect(("127.0.0.1", port)).await.expect("connect");
         let auth_line = bearer.map(|t| format!("Authorization: Bearer {t}\r\n")).unwrap_or_default();
-        let request = format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n{auth_line}\r\n");
+        let request = format!(
+            "POST /open_gitea.v1.Gitea/{method} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {}\r\n{auth_line}\r\n{json}",
+            json.len()
+        );
         stream.write_all(request.as_bytes()).await.expect("write");
         let mut buf = Vec::new();
         stream.read_to_end(&mut buf).await.expect("read");
@@ -1846,14 +1869,21 @@ mod handler_tests {
         let client = TestClient::new(app);
 
         let create_resp = client
-            .put("/repos/secret")
+            .post("/open_gitea.v1.Gitea/CreateRepo")
+            .content_type("application/json")
+            .body(r#"{"name":"secret"}"#)
             .header("Authorization", format!("Bearer {token}"))
             .send()
             .await;
-        create_resp.assert_status(poem::http::StatusCode::CREATED);
+        create_resp.assert_status_is_ok();
 
         // private(既定)のままなら、未ログインでのWiki一覧取得は拒否される。
-        let anon_resp = client.get("/api/repos/secret/wiki").send().await;
+        let anon_resp = client
+            .post("/open_gitea.v1.Gitea/ListWiki")
+            .content_type("application/json")
+            .body(r#"{"name":"secret"}"#)
+            .send()
+            .await;
         anon_resp.assert_status(poem::http::StatusCode::FORBIDDEN);
 
         // 本体リポジトリのアクセス設定をpublic+閲覧許可に変更する
@@ -1862,7 +1892,12 @@ mod handler_tests {
         let config = access::AccessConfig { mode: access::Mode::Public, group: None, allow_view: true, allow_download: false, allow_push: false, accounts: std::collections::HashMap::new() };
         access::save(&repo_path, &config).await.unwrap();
 
-        let anon_resp2 = client.get("/api/repos/secret/wiki").send().await;
+        let anon_resp2 = client
+            .post("/open_gitea.v1.Gitea/ListWiki")
+            .content_type("application/json")
+            .body(r#"{"name":"secret"}"#)
+            .send()
+            .await;
         anon_resp2.assert_status_is_ok();
 
         // git smart HTTP側(push)も同じ設定を見る: pushは許可していないため
@@ -1873,6 +1908,58 @@ mod handler_tests {
             .send()
             .await;
         git_push_resp.assert_status(poem::http::StatusCode::UNAUTHORIZED);
+    }
+
+    /// Connect 入口の基本動作: 旧REST経路は404、認証なし401、不正入力400、重複キー400、正常200。
+    #[tokio::test]
+    async fn connect_contract_and_old_rest_paths_are_gone() {
+        let state = make_state("connect-contract").await;
+        let token = state.auth.create_session(ADMIN_EMAIL);
+        let app = build_routes(state, "./static");
+        let client = TestClient::new(app);
+        let url = "/open_gitea.v1.Gitea/";
+
+        // 旧RESTの経路は(git smart HTTP のフォールバックに落ちて)使えない。
+        for path in ["/api/repos", "/api/groups", "/api/capacity", "/api/power-profile", "/api/accounts", "/repos"] {
+            let r = client.get(path).send().await;
+            assert!(!r.0.status().is_success(), "old REST path {path} must be gone");
+        }
+        assert!(!client.put("/repos/x").send().await.0.status().is_success());
+        assert!(!client.post("/api/auth/demo-login").send().await.0.status().is_success());
+
+        // 認証なし → 401 / Connect形式
+        let r = client.post(format!("{url}ListGroups")).content_type("application/json").body("{}").send().await;
+        r.assert_status(poem::http::StatusCode::UNAUTHORIZED);
+        let v: serde_json::Value = serde_json::from_slice(&r.0.into_body().into_bytes().await.unwrap()).unwrap();
+        assert_eq!(v["code"], "unauthenticated");
+
+        // 不正入力 → 400(必須フィールド欠落/JSONでない/配列/重複キー)
+        for body in ["{}", "not json", "[1]", r#"{"name":"a","name":"b"}"#] {
+            let r = client
+                .post(format!("{url}GetAccess"))
+                .content_type("application/json")
+                .body(body)
+                .header("Authorization", format!("Bearer {token}"))
+                .send()
+                .await;
+            r.assert_status(poem::http::StatusCode::BAD_REQUEST);
+        }
+        // content-type違い → 400、GET → 405、未知メソッド → 404
+        client.post(format!("{url}ListGroups")).content_type("text/plain").body("{}").send().await.assert_status(poem::http::StatusCode::BAD_REQUEST);
+        client.get(format!("{url}ListGroups")).send().await.assert_status(poem::http::StatusCode::METHOD_NOT_ALLOWED);
+        client.post(format!("{url}Nope")).content_type("application/json").body("{}").send().await.assert_status(poem::http::StatusCode::NOT_FOUND);
+
+        // 正常 → 200
+        let r = client
+            .post(format!("{url}ListGroups"))
+            .content_type("application/json")
+            .body("{}")
+            .header("Authorization", format!("Bearer {token}"))
+            .send()
+            .await;
+        r.assert_status_is_ok();
+        let r = client.post(format!("{url}ListRepos")).content_type("application/json").body("{}").send().await;
+        r.assert_status_is_ok();
     }
 
     #[test]
@@ -1898,7 +1985,12 @@ mod handler_tests {
         let app = build_routes(state, "./static");
         let client = TestClient::new(app);
 
-        let resp = client.get("/api/power-profile").send().await;
+        let resp = client
+            .post("/open_gitea.v1.Gitea/GetPowerProfile")
+            .content_type("application/json")
+            .body("{}")
+            .send()
+            .await;
         resp.assert_status_is_ok();
         let body: serde_json::Value = serde_json::from_slice(&resp.0.into_body().into_bytes().await.unwrap()).unwrap();
         assert_eq!(body["power_save"], false);

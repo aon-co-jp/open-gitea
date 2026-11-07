@@ -1,4 +1,4 @@
-//! ログインUI(メールOTP)。`POST /api/auth/{request-otp,verify-otp,logout}`を
+//! ログインUI(メールOTP)。Connect の`RequestOtp`/`VerifyOtp`/`Logout`を
 //! `fetch`で叩き、セッショントークンを`localStorage`(キー`open_gitea_token`・
 //! `open_gitea_email`)へ保存する。以後の認証付きリクエストは
 //! `Authorization: Bearer <token>`ヘッダを付与する(`authorized_fetch`)。
@@ -85,6 +85,20 @@ fn input_value(id: &str) -> String {
         .unwrap_or_default()
 }
 
+/// Connect の単純呼び出し(`POST /open_gitea.v1.Gitea/<Method>`、本文はJSON)。
+/// ログイン済みなら`Authorization: Bearer <token>`を付与する。`body`が`None`なら`{}`を送る。
+/// REST全廃方針(2026-11-07)により、画面からのAPI呼び出しはすべてこの関数を通る。
+pub async fn connect(method: &str, body: Option<&str>) -> Result<(u16, String), JsValue> {
+    authorized_fetch(&format!("{CONNECT_PREFIX}{method}"), "POST", Some(body.unwrap_or("{}"))).await
+}
+
+/// 本文だけが欲しい呼び出し(ステータスは見ない)。
+pub async fn connect_text(method: &str, body: Option<&str>) -> Result<String, JsValue> {
+    connect(method, body).await.map(|(_, t)| t)
+}
+
+pub(crate) const CONNECT_PREFIX: &str = "/open_gitea.v1.Gitea/";
+
 /// 認証付き`fetch`。ログイン済みなら`Authorization: Bearer <token>`を付与する。
 /// `body`が`Some`ならJSON POST、`None`ならGET相当のメソッド指定なし。
 pub async fn authorized_fetch(url: &str, method: &str, body: Option<&str>) -> Result<(u16, String), JsValue> {
@@ -141,7 +155,7 @@ async fn request_otp() {
         return;
     }
     let body = format!(r#"{{"email":"{}"}}"#, json_escape(&email));
-    match authorized_fetch("/api/auth/request-otp", "POST", Some(&body)).await {
+    match connect("RequestOtp", Some(&body)).await {
         Ok((200, _)) => {
             show("login-code", true);
             show("btn-verify-otp", true);
@@ -163,7 +177,7 @@ async fn verify_otp() {
         return;
     }
     let body = format!(r#"{{"email":"{}","code":"{}"}}"#, json_escape(&email), json_escape(&code));
-    match authorized_fetch("/api/auth/verify-otp", "POST", Some(&body)).await {
+    match connect("VerifyOtp", Some(&body)).await {
         Ok((200, text)) => match parse_light(&text).ok().and_then(|v| v.get("token")?.as_str().map(str::to_string)) {
             Some(token) => {
                 store_session(&email, &token);
@@ -179,7 +193,7 @@ async fn verify_otp() {
 }
 
 async fn logout() {
-    let _ = authorized_fetch("/api/auth/logout", "POST", None).await;
+    let _ = connect("Logout", None).await;
     clear_session();
     refresh_auth_ui();
 }

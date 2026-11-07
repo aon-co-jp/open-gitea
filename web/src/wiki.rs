@@ -1,5 +1,5 @@
-//! Wiki表示UI(2026-07-22追加)。`GET /api/repos/:name/wiki`(ページ名一覧)・
-//! `GET /api/repos/:name/wiki/:page`(1ページの内容)を`fetch`し、README表示
+//! Wiki表示UI(2026-07-22追加)。Connect の`ListWiki`(ページ名一覧)・
+//! `GetWikiPage`(1ページの内容)を呼び、README表示
 //! (`web/src/lib.rs`の`load_readme`)と同じ「Markdown→HTMLはブラウザ側で
 //! 変換」「JSONパースは`rust_json::parse_light`のみ」という方針をそのまま
 //! 踏襲する。
@@ -49,8 +49,8 @@ git push</code></pre>\
 
 async fn load_page(repo: String, page: String) {
     set_html("wiki-content", "<p><em>読み込み中...</em></p>");
-    let url = format!("/api/repos/{repo}/wiki/{page}");
-    match fetch_text(&url).await {
+    let body = format!(r#"{{"name":"{}","page":"{}"}}"#, crate::auth::json_escape(&repo), crate::auth::json_escape(&page));
+    match fetch_text("GetWikiPage", Some(&body)).await {
         Ok(text) => match parse_page_fields(&text) {
             Some((_branch, content)) => {
                 set_html("wiki-content", &markdown_to_html(&content));
@@ -113,8 +113,8 @@ fn wire_page_list_clicks() {
 pub async fn load_wiki_list(repo: String) {
     set_html("wiki-content", "<p><em>左のページ名をクリックすると内容を表示します。</em></p>");
     set_html("wiki-edit-instructions", &edit_instructions_html(&repo));
-    let url = format!("/api/repos/{repo}/wiki");
-    match fetch_text(&url).await {
+    let body = format!(r#"{{"name":"{}"}}"#, crate::auth::json_escape(&repo));
+    match fetch_text("ListWiki", Some(&body)).await {
         Ok(text) => {
             let pages = parse_string_array(&text);
             render_page_list(&repo, &pages);

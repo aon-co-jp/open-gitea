@@ -36,13 +36,9 @@ fn document() -> Document {
     web_sys::window().expect("no window").document().expect("no document")
 }
 
-/// `auth::api_url`と同じ接頭辞規約(`/open-gitea`マウント、モジュールdoc参照)。
-pub(crate) async fn fetch_text(url: &str) -> Result<String, JsValue> {
-    let window = web_sys::window().ok_or_else(|| JsValue::from_str("no window"))?;
-    let resp_value = JsFuture::from(window.fetch_with_str(&auth::api_url(url))).await?;
-    let resp: web_sys::Response = resp_value.dyn_into()?;
-    let text_value = JsFuture::from(resp.text()?).await?;
-    Ok(text_value.as_string().unwrap_or_default())
+/// Connect の呼び出し結果の本文を返す(`auth::connect_text`の別名。ステータスは見ない)。
+pub(crate) async fn fetch_text(method: &str, body: Option<&str>) -> Result<String, JsValue> {
+    auth::connect_text(method, body).await
 }
 
 pub(crate) fn markdown_to_html(src: &str) -> String {
@@ -81,8 +77,8 @@ async fn load_readme(repo: String) {
     if !is_memory_saver_mode() {
         wasm_bindgen_futures::spawn_local(wiki::load_wiki_list(repo.clone()));
     }
-    let url = format!("/api/repos/{repo}/readme");
-    match fetch_text(&url).await {
+    let body = format!(r#"{{"name":"{}"}}"#, auth::json_escape(&repo));
+    match fetch_text("GetReadme", Some(&body)).await {
         Ok(text) => match parse_readme_fields(&text) {
             Some((branch, content)) => {
                 if let Some(el) = document().get_element_by_id("readme") {
@@ -143,7 +139,7 @@ fn wire_repo_list_clicks() {
 
 async fn load_repo_list() {
     show_status("リポジトリ一覧を読み込み中...");
-    match fetch_text("/api/repos").await {
+    match fetch_text("ListRepos", None).await {
         Ok(text) => {
             let names = parse_string_array(&text);
             render_repo_list(&names);
@@ -159,7 +155,7 @@ async fn load_repo_list() {
 /// (JSONに浮動小数として保持される、`u64`最大値付近の誤差は表示用途では
 /// 許容)。
 async fn load_capacity() {
-    let Ok((_, text)) = auth::authorized_fetch("/api/capacity", "GET", None).await else { return };
+    let Ok((_, text)) = auth::connect("GetCapacity", None).await else { return };
     let Some(value) = parse_light(&text).ok() else { return };
     let allowed = value.get("allowed").and_then(LightValue::as_bool).unwrap_or(false);
     let free_bytes = value.get("free_bytes").and_then(LightValue::as_f64).unwrap_or(0.0);
@@ -313,7 +309,7 @@ async fn apply_server_default_profile_once() {
         return;
     }
     flag_set(SERVER_DEFAULT_APPLIED_KEY, true);
-    let Ok(text) = fetch_text("/api/power-profile").await else { return };
+    let Ok(text) = fetch_text("GetPowerProfile", None).await else { return };
     let Ok(value) = parse_light(&text) else { return };
     if value.get("power_save").and_then(LightValue::as_bool).unwrap_or(false) {
         flag_set(PROFILE_POWER_SAVE_KEY, true);
