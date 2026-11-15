@@ -23,6 +23,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Fetch sibling path dependency (RS-JSON -> ../RS-JSON)
+        shell: bash
+        run: git clone --depth 1 https://github.com/aon-co-jp/RS-JSON.git ../RS-JSON
       - name: Install musl target
         run: |
           rustup target add x86_64-unknown-linux-musl
@@ -46,6 +49,9 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Fetch sibling path dependency (RS-JSON -> ../RS-JSON)
+        shell: bash
+        run: git clone --depth 1 https://github.com/aon-co-jp/RS-JSON.git ../RS-JSON
       - name: Build
         run: cargo build --release --target x86_64-pc-windows-msvc --bin open-gitea
       - name: Package
@@ -68,6 +74,9 @@ jobs:
     continue-on-error: true  # Snapdragon (Windows on ARM64); never blocks the release
     steps:
       - uses: actions/checkout@v4
+      - name: Fetch sibling path dependency (RS-JSON -> ../RS-JSON)
+        shell: bash
+        run: git clone --depth 1 https://github.com/aon-co-jp/RS-JSON.git ../RS-JSON
       - name: Build
         run: cargo build --release --target aarch64-pc-windows-msvc --bin open-gitea
       - name: Package
