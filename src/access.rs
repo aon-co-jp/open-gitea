@@ -14,7 +14,7 @@
 //! 個別アカウントではなく、**グループ発行時に生成する共有トークン**を
 //! 知っている人全員として扱う(招待リンク方式)。
 
-use rand::Rng;
+use rand::RngExt;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -165,8 +165,8 @@ pub async fn save_groups(repos_root: &Path, store: &GroupStore) -> std::io::Resu
 }
 
 pub fn generate_token() -> String {
-    let mut rng = rand::thread_rng();
-    let bytes: [u8; 16] = rng.gen();
+    let mut rng = rand::rng();
+    let bytes: [u8; 16] = rng.random();
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 

@@ -18,7 +18,7 @@ wasm-bindgen-futures = "0.4"
 # RGitと同じ`F:\runo`配下のsibling repoである前提のpath依存
 # (詳細はsrc/lib.rsのモジュールdoc参照)。
 rust-json = { path = "../../RS-JSON", default-features = false }
-pulldown-cmark = { version = "0.12", default-features = false, features = ["html"] }
+pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
 
 [dependencies.web-sys]
 version = "0.3"
