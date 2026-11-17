@@ -1502,6 +1502,11 @@ fn parse_git_repo_and_need(path_info: &str, query_string: &str) -> Option<(Strin
 #[handler]
 async fn git_get(req: &Request, state: Data<&AppState>) -> PoemResult<Response> {
     let path_info = req.uri().path().to_string();
+    // 入口: `/` は画面(`ui/`)へ。相対リダイレクトなので、`/open-gitea/` のような接頭辞つきの公開パスでも
+    // `/open-gitea/ui/` になる(`/*path` が `/` も受けるため、ここで判定する)。
+    if path_info == "/" {
+        return Ok(Response::builder().status(poem::http::StatusCode::TEMPORARY_REDIRECT).header("Location", "ui/").finish());
+    }
     let query_string = req.uri().query().unwrap_or("").to_string();
     if let Some((repo_dir, need)) = parse_git_repo_and_need(&path_info, &query_string) {
         let repo_path = state.repos_root.join(&repo_dir);
@@ -1960,6 +1965,15 @@ mod handler_tests {
         r.assert_status_is_ok();
         let r = client.post(format!("{url}ListRepos")).content_type("application/json").body("{}").send().await;
         r.assert_status_is_ok();
+    }
+
+    #[tokio::test]
+    async fn root_redirects_to_ui() {
+        let state = make_state("root-redirect").await;
+        let client = TestClient::new(build_routes(state, "./static"));
+        let r = client.get("/").send().await;
+        r.assert_status(poem::http::StatusCode::TEMPORARY_REDIRECT);
+        r.assert_header("location", "ui/");
     }
 
     #[test]
