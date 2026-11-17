@@ -176,7 +176,7 @@ Apache-2.0
 
 **未了・次の手**
 1. **ログイン後の通し操作**: 管理者の OTP ログイン→リポジトリ作成→Issue/Wiki/アクセス設定を画面で通す(今回のブラウザ確認はデモログインまで。管理パネルはデモユーザーでは 401 が正常)。
-2. **`/` が 404**: 画面は `/ui/` 配下の仕様。**2026-11-17 確認: 反映前のバイナリ(VPSのバックアップ)でも `/`=404・`/ui/`=404(新は `/ui/`=200)で、今回の変更による退行ではない**。残りは入口(`/` から `/ui/` への振り替え)をするかの判断のみ。
+2. **`/` が 404**: 画面は `/ui/` 配下の仕様。**2026-11-17 確認: 反映前のバイナリ(VPSのバックアップ)でも `/`=404・`/ui/`=404(新は `/ui/`=200)で、今回の変更による退行ではない**。**対応済み(2026-11-17、`ec68cb8`): `GET /` は相対リダイレクト(307)で `ui/` へ。本番反映済み(`easy-web.tokyo/open-gitea/` → `/open-gitea/ui/` が 200)。**
 3. **RS-Sync の実同期**: VPS の `rs-sync` を Connect 対応版に入れ替えたが、open-gitea へ実際に同期が通る確認は未了(起動と HTTP 200 までは確認)。
 4. **VPS の git clone** `/root/open-gitea` は未コミット変更(`Cargo.lock`)があり `git pull` していない。バイナリと `static/` だけ置換済み。必要なら整理を判断する。
 5. 紹介ページ `webpage/index.html` は追加済み(`d71328e`)だが、`easy-web.tokyo/open-gitea` が稼働中のアプリのため VPS へは未配置(置き場所の判断待ち)。
@@ -193,7 +193,7 @@ Apache-2.0
 
 **Open items / next steps**
 1. **Authenticated end-to-end flow**: admin OTP login → create a repository → Issues / Wiki / access settings in the UI. (The browser check only covered demo login; the admin panels returning 401 for the demo user is expected.)
-2. **`/` returns 404**: the UI is served under `/ui/` by design. **Checked 2026-11-17: the pre-deploy binary (VPS backup) also returns 404 for `/` (and for `/ui/`; the new one returns 200 for `/ui/`), so this is not a regression.** Only the decision on redirecting `/` to `/ui/` remains.
+2. **`/` returns 404**: the UI is served under `/ui/` by design. **Checked 2026-11-17: the pre-deploy binary (VPS backup) also returns 404 for `/` (and for `/ui/`; the new one returns 200 for `/ui/`), so this is not a regression.** **Done 2026-11-17 (`ec68cb8`): `GET /` now returns a relative 307 to `ui/`; deployed (`easy-web.tokyo/open-gitea/` → `/open-gitea/ui/` returns 200).**
 3. **RS-Sync real sync**: the VPS `rs-sync` was swapped to the Connect-aware build, but an actual sync into open-gitea has not been verified (only startup and HTTP 200).
 4. **VPS git clone** `/root/open-gitea` has an uncommitted change (`Cargo.lock`), so `git pull` was not run; only the binary and `static/` were replaced. Decide whether to tidy it.
 5. The intro page `webpage/index.html` exists (`d71328e`) but is not deployed to the VPS because `easy-web.tokyo/open-gitea` is the running app (needs a placement decision).
