@@ -176,3 +176,7 @@
 - **Server-streaming is supported** (`open-runo-connect-*` in RPoem, main `1570371` / `34cb595`): `application/connect+json` envelopes, also via gRPC / gRPC-web; mid-stream errors end with a terminal frame; item/time limits, resource release on disconnect, and a real-TCP `WatchEvents` test pass. **Not yet deployed to the VPS.**
 - **When to use**: watching changes, progress updates, incremental results. One-shot calls stay plain Connect unary. Client-streaming / bidirectional only when needed.
 - German and Russian not yet added.
+
+## 2026-11-20 依存の脆弱性修正 / Dependency security fix
+**日本語**: lettre 0.11.24(RUSTSEC-2026-0560〜0565) を更新し、`cargo test --locked` が全件成功しました(本番反映は別途)。
+**English**: Updated lettre 0.11.24(RUSTSEC-2026-0560〜0565); `cargo test --locked` passes (production deploy is separate).
