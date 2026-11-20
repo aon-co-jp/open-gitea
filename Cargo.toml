@@ -21,7 +21,7 @@ serde_json = "1"
 rand = "0.10"
 sha2 = "0.11"
 lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "builder", "rustls-tls"] }
-base64 = "0.22"
+base64 = "0.23"
 fs2 = "0.4"
 chrono = "0.4"
 rust-json = { path = "../RS-JSON", features = ["full"] }
