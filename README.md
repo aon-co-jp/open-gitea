@@ -222,3 +222,7 @@ Apache-2.0
 ## 2026-11-26 Versionless 別名 / Versionless alias
 **日本語**: Versionless API 方針に沿い、版なしの `POST /open_gitea.Gitea/<Method>` を追加しました(`.v1` は呼び出し側を壊さないため当面残し、段階的に畳みます)。本番反映は未実施。
 **English**: Following the Versionless API policy, `POST /open_gitea.Gitea/<Method>` (no version) was added; `.v1` stays for now and will be retired in stages. Not yet deployed to production.
+
+## 2026-11-26 版なし別名を本番へ反映 / Versionless alias deployed
+**日本語**: `a3bceb5` を WSL Ubuntu-24.04(glibc 2.39、検査OK)でビルドし、VPS の open-gitea を入れ替えました。確認: 版なし `/open_gitea.Gitea/ListRepos` 200、`.v1` 200、旧 `/api/repos` 404、公開URL `/open-gitea/` 307・`/ui/` 200、エラーログ0。旧版は `open-gitea.before-versionless-20261126`(戻すときはこれを元の名前へ戻して再起動)。
+**English**: `a3bceb5` was built in WSL Ubuntu-24.04 (glibc 2.39, check OK) and swapped into the VPS. Verified: versionless `/open_gitea.Gitea/ListRepos` 200, `.v1` 200, old `/api/repos` 404, public `/open-gitea/` 307 and `/ui/` 200, error log 0. Rollback: restore `open-gitea.before-versionless-20261126` and restart.
