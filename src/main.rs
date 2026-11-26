@@ -1572,7 +1572,6 @@ fn build_routes(state: AppState, static_dir: &str) -> impl poem::Endpoint {
     let inner_shared = std::sync::Arc::new(inner);
     Route::new()
         .at("/healthz", get(healthz))
-        .at("/open_gitea.v1.Gitea/:method", connect::endpoint(inner_shared.clone()))
         .at("/open_gitea.Gitea/:method", connect::endpoint(inner_shared))
         // 例外: ブラウザが直接開くダウンロード用 GET(リンク共有・`?token=` 認証)
         .at("/api/repos/:name/zip", get(get_zip))
@@ -1652,7 +1651,7 @@ mod handler_tests {
 
         // 未登録のメールアドレスは404ではなく registered:false を返す。
         let resp = client
-            .post("/open_gitea.v1.Gitea/GetAccount")
+            .post("/open_gitea.Gitea/GetAccount")
             .content_type("application/json")
             .body(r#"{"email":"nobody@example.com"}"#)
             .header("Authorization", format!("Bearer {token}"))
@@ -1670,7 +1669,7 @@ mod handler_tests {
         accounts::save(&repos_root, &store).await.unwrap();
 
         let resp2 = client
-            .post("/open_gitea.v1.Gitea/GetAccount")
+            .post("/open_gitea.Gitea/GetAccount")
             .content_type("application/json")
             .body(r#"{"email":"member@example.com"}"#)
             .header("Authorization", format!("Bearer {token}"))
@@ -1689,7 +1688,7 @@ mod handler_tests {
         let client = TestClient::new(app);
 
         let resp = client
-            .post("/open_gitea.v1.Gitea/GetAccount")
+            .post("/open_gitea.Gitea/GetAccount")
             .content_type("application/json")
             .body(r#"{"email":"member@example.com"}"#)
             .send()
@@ -1710,7 +1709,7 @@ mod handler_tests {
         let client = TestClient::new(app);
 
         let resp = client
-            .post("/open_gitea.v1.Gitea/CreateRepo")
+            .post("/open_gitea.Gitea/CreateRepo")
             .content_type("application/json")
             .body(r#"{"name":"demo"}"#)
             .header("Authorization", format!("Bearer {token}"))
@@ -1724,7 +1723,7 @@ mod handler_tests {
         // 空リポジトリ(コミット無し)なので、一覧APIはエラーではなく
         // 空配列を返す(要件通り)。
         let wiki_resp = client
-            .post("/open_gitea.v1.Gitea/ListWiki")
+            .post("/open_gitea.Gitea/ListWiki")
             .content_type("application/json")
             .body(r#"{"name":"demo"}"#)
             .header("Authorization", format!("Bearer {token}"))
@@ -1779,7 +1778,7 @@ mod handler_tests {
             let app = build_routes(state.clone(), "./static");
             let client = TestClient::new(app);
             let resp = client
-                .post("/open_gitea.v1.Gitea/CreateRepo")
+                .post("/open_gitea.Gitea/CreateRepo")
                 .content_type("application/json")
                 .body(r#"{"name":"proj"}"#)
                 .header("Authorization", format!("Bearer {token}"))
@@ -1852,7 +1851,7 @@ mod handler_tests {
         let mut stream = TcpStream::connect(("127.0.0.1", port)).await.expect("connect");
         let auth_line = bearer.map(|t| format!("Authorization: Bearer {t}\r\n")).unwrap_or_default();
         let request = format!(
-            "POST /open_gitea.v1.Gitea/{method} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {}\r\n{auth_line}\r\n{json}",
+            "POST /open_gitea.Gitea/{method} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\nContent-Type: application/json\r\nContent-Length: {}\r\n{auth_line}\r\n{json}",
             json.len()
         );
         stream.write_all(request.as_bytes()).await.expect("write");
@@ -1876,7 +1875,7 @@ mod handler_tests {
         let client = TestClient::new(app);
 
         let create_resp = client
-            .post("/open_gitea.v1.Gitea/CreateRepo")
+            .post("/open_gitea.Gitea/CreateRepo")
             .content_type("application/json")
             .body(r#"{"name":"secret"}"#)
             .header("Authorization", format!("Bearer {token}"))
@@ -1886,7 +1885,7 @@ mod handler_tests {
 
         // private(既定)のままなら、未ログインでのWiki一覧取得は拒否される。
         let anon_resp = client
-            .post("/open_gitea.v1.Gitea/ListWiki")
+            .post("/open_gitea.Gitea/ListWiki")
             .content_type("application/json")
             .body(r#"{"name":"secret"}"#)
             .send()
@@ -1900,7 +1899,7 @@ mod handler_tests {
         access::save(&repo_path, &config).await.unwrap();
 
         let anon_resp2 = client
-            .post("/open_gitea.v1.Gitea/ListWiki")
+            .post("/open_gitea.Gitea/ListWiki")
             .content_type("application/json")
             .body(r#"{"name":"secret"}"#)
             .send()
@@ -1924,8 +1923,16 @@ mod handler_tests {
         let token = state.auth.create_session(ADMIN_EMAIL);
         let app = build_routes(state, "./static");
         let client = TestClient::new(app);
-        let url = "/open_gitea.v1.Gitea/";
+        let url = "/open_gitea.Gitea/";
 
+        // 版つき(.v1)の経路は削除済み(404)。
+        let r = client
+            .post("/open_gitea.v1.Gitea/ListRepos")
+            .header("content-type", "application/json")
+            .body("{}")
+            .send()
+            .await;
+        assert!(!r.0.status().is_success(), ".v1 path must be gone");
         // 旧RESTの経路は(git smart HTTP のフォールバックに落ちて)使えない。
         for path in ["/api/repos", "/api/groups", "/api/capacity", "/api/power-profile", "/api/accounts", "/repos"] {
             let r = client.get(path).send().await;
@@ -2002,7 +2009,7 @@ mod handler_tests {
         let client = TestClient::new(app);
 
         let resp = client
-            .post("/open_gitea.v1.Gitea/GetPowerProfile")
+            .post("/open_gitea.Gitea/GetPowerProfile")
             .content_type("application/json")
             .body("{}")
             .send()

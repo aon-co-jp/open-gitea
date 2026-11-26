@@ -1,6 +1,6 @@
 //! Connect の「単純呼び出し(unary)」で受ける API の入口(2026-11-07、REST 全廃方針に基づき新設)。
 //!
-//! 形式は `POST /open_gitea.v1.Gitea/<Method>`、本文は JSON(`content-type: application/json`)。
+//! 形式は `POST /open_gitea.Gitea/<Method>`、本文は JSON(`content-type: application/json`)。
 //! 読み込みは RS-JSON の `parse_secure`(サイズ・深さ・重複キーの上限つき)。
 //! エラーは Connect の形式 `{"code": "...", "message": "..."}`。
 //!
@@ -20,9 +20,7 @@ use poem::http::{header, Method, StatusCode};
 use poem::{Endpoint, EndpointExt, Request, Response};
 use serde_json::Value;
 
-pub const PREFIX: &str = "/open_gitea.v1.Gitea/";
-/// Versionless 別名(版なし。`.v1` は互換のため当面残す)。
-pub const PREFIX_VERSIONLESS: &str = "/open_gitea.Gitea/";
+pub const PREFIX: &str = "/open_gitea.Gitea/";
 /// 本文の上限(Issue 本文などを考慮して 1 MiB)。
 const BODY_MAX: usize = 1024 * 1024;
 
@@ -108,12 +106,7 @@ pub fn endpoint(inner: impl Endpoint + 'static) -> impl Endpoint<Output = Respon
             if req.method() != Method::POST {
                 return fail(StatusCode::METHOD_NOT_ALLOWED, "POST only");
             }
-            let path = req.uri().path();
-            let name = path
-                .strip_prefix(PREFIX)
-                .or_else(|| path.strip_prefix(PREFIX_VERSIONLESS))
-                .unwrap_or("")
-                .to_string();
+            let name = req.uri().path().strip_prefix(PREFIX).unwrap_or("").to_string();
             let Some(&(_, verb, template, keys)) = TABLE.iter().find(|(n, ..)| *n == name) else {
                 return fail(StatusCode::NOT_FOUND, "unknown method");
             };

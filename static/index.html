@@ -188,7 +188,7 @@
     demoBtn.addEventListener("click", async function () {
       markUserInteracted();
       try {
-        var res = await fetch(API_BASE + "/open_gitea.v1.Gitea/DemoLogin", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+        var res = await fetch(API_BASE + "/open_gitea.Gitea/DemoLogin", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
         if (!res.ok) { throw new Error("status " + res.status); }
         var data = await res.json();
         localStorage.setItem("open_gitea_token", data.token);
@@ -226,7 +226,7 @@
       demoOn = !demoOn;
       if (demoOn) {
         try {
-          var res = await fetch(API_BASE + "/open_gitea.v1.Gitea/DemoLogin", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+          var res = await fetch(API_BASE + "/open_gitea.Gitea/DemoLogin", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
           if (!res.ok) { throw new Error("status " + res.status); }
           var data = await res.json();
           sessionStorage.setItem("open_gitea_auto_demo", "1");

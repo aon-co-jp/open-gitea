@@ -85,7 +85,7 @@ fn input_value(id: &str) -> String {
         .unwrap_or_default()
 }
 
-/// Connect の単純呼び出し(`POST /open_gitea.v1.Gitea/<Method>`、本文はJSON)。
+/// Connect の単純呼び出し(`POST /open_gitea.Gitea/<Method>`、本文はJSON)。
 /// ログイン済みなら`Authorization: Bearer <token>`を付与する。`body`が`None`なら`{}`を送る。
 /// REST全廃方針(2026-11-07)により、画面からのAPI呼び出しはすべてこの関数を通る。
 pub async fn connect(method: &str, body: Option<&str>) -> Result<(u16, String), JsValue> {
@@ -97,7 +97,7 @@ pub async fn connect_text(method: &str, body: Option<&str>) -> Result<String, Js
     connect(method, body).await.map(|(_, t)| t)
 }
 
-pub(crate) const CONNECT_PREFIX: &str = "/open_gitea.v1.Gitea/";
+pub(crate) const CONNECT_PREFIX: &str = "/open_gitea.Gitea/";
 
 /// 認証付き`fetch`。ログイン済みなら`Authorization: Bearer <token>`を付与する。
 /// `body`が`Some`ならJSON POST、`None`ならGET相当のメソッド指定なし。
