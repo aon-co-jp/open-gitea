@@ -20,3 +20,7 @@ REST は全廃し、独自 API は Connect(`POST /open_gitea.v1.Gitea/<Method>`)
 ## 2026-11-23 現状 / Status (日本語・English)
 **日本語**: 本番確認済み。`/open-gitea/` は307で `ui/` へ、`/ui/` 200、旧 `/api/repos` 404、Connect `ListRepos` 200。VPSの `open-gitea`・`rs-sync` は active、直近2日のエラー/panic 0。依存は base64 0.23 まで更新済み(`d223513`)、`docs-latest` のCIは成功。**未了**: ログイン後の管理操作の通し(所有者のメールOTPが必要)、RS-Syncから実際の同期、VPSの `/root/open-gitea` クローンの整理(分岐の可能性、`git pull` しない・要確認)、紹介ページの置き場所の判断。再開するリポジトリ: `open-gitea`・`RS-Sync`・`runo`。
 **English**: Verified in production: `/open-gitea/` returns 307 to `ui/`, `/ui/` 200, old `/api/repos` 404, Connect `ListRepos` 200. VPS `open-gitea` and `rs-sync` are active with 0 errors/panics in 2 days. Dependencies are updated through base64 0.23 (`d223513`) and the `docs-latest` CI passes. **Open**: authenticated admin end-to-end (needs the owner's e-mail OTP), a real RS-Sync sync, tidying the VPS `/root/open-gitea` clone (may have diverged; do not `git pull`, ask first), and deciding where the intro page lives. Repos to resume: `open-gitea`, `RS-Sync`, `runo`.
+
+## 2026-11-26 Versionless 別名 / Versionless alias
+**日本語**: Versionless API 方針に沿い、版なしの `POST /open_gitea.Gitea/<Method>` を追加しました(`.v1` は呼び出し側を壊さないため当面残し、段階的に畳みます)。本番反映は未実施。
+**English**: Following the Versionless API policy, `POST /open_gitea.Gitea/<Method>` (no version) was added; `.v1` stays for now and will be retired in stages. Not yet deployed to production.

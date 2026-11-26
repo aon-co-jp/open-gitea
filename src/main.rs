@@ -1569,9 +1569,11 @@ fn build_routes(state: AppState, static_dir: &str) -> impl poem::Endpoint {
         .at("/api/capacity", get(get_capacity))
         .at("/api/power-profile", get(get_power_profile))
         .data(state.clone());
+    let inner_shared = std::sync::Arc::new(inner);
     Route::new()
         .at("/healthz", get(healthz))
-        .at("/open_gitea.v1.Gitea/:method", connect::endpoint(inner))
+        .at("/open_gitea.v1.Gitea/:method", connect::endpoint(inner_shared.clone()))
+        .at("/open_gitea.Gitea/:method", connect::endpoint(inner_shared))
         // 例外: ブラウザが直接開くダウンロード用 GET(リンク共有・`?token=` 認証)
         .at("/api/repos/:name/zip", get(get_zip))
         .at("/api/repos/:name/raw/*filepath", get(get_raw_file))
